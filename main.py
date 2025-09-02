@@ -1,3 +1,14 @@
+import sqlite3
+import pandas as pd
+import datetime
+import numpy as np
+import configparser
+import os, platform, sys
+import threading
+import time
+import xml.etree.ElementTree as ET
+import gzip
+import shutil
 def main(param_file):
     # Environment / Variables
     # current date and time
@@ -15,7 +26,7 @@ def main(param_file):
         hostname = os.uname()[1]
 
     config = configparser.ConfigParser()
-    config_file = 'PersonalDataWareHouse.cfg'
+    config_file = 'config/PersonalDataWareHouse.cfg'
 
     if len(param_file) > 0:
         config_file = param_file
