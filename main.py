@@ -87,6 +87,7 @@ from reports.monthly_data import monthly_summaries
 from reports.general_exportator import general_entries_file_exportator
 from reports.split_paymnts import split_paymnt_resume
 from reports.xlsx_reports import xlsx_report_generator
+from reports.novos_relatorios import gerar_todos_relatorios_integrado
 
 def main(param_file):
     # Environment / Variables
@@ -154,6 +155,7 @@ def main(param_file):
         transient_data_file = config['FILE_TYPES']['TRANSIENT_DATA_FILE']
         origem_dados = config['SETTINGS']['TRANSIENT_DATA_COLUMN']
         other_file_types = config.getboolean('SETTINGS', 'EXPORT_OTHER_TYPES')
+        new_reports = config.getboolean('SETTINGS', 'NEW_REPORTS')
 
         dinamic_reports = config.getboolean('SETTINGS', 'RUN_DINAMIC_REPORT')
         din_report_guinding = config['SETTINGS']['DIN_REPORT_GUIDING']
@@ -277,6 +279,8 @@ def main(param_file):
         xlsx_report_generator(sqlite_database, dir_file_out, output_name, multi_rept_file, out_type,
                               general_entries_table, dinamic_reports, din_report_guinding, create_pivot,
                               anual_hist_table, full_hist_table, dayly_progress, out_table, monthly_summarie)
+        if new_reports:
+            gerar_todos_relatorios_integrado(sqlite_database, general_entries_table,dir_file_out)
 
     if export_transeient_data:
         print(out_line)

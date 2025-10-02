@@ -1,5 +1,8 @@
 import sqlite3
 import pandas as pd
+from utils.compressor import gzip_compressor
+from utils.xml_df import dataframe_to_xml
+
 
 def general_entries_file_exportator(data_base_file, dir_out, file_out, table_name, other_types) :
     connection = sqlite3.connect(data_base_file)

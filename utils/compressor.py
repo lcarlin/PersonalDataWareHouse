@@ -1,5 +1,6 @@
 import gzip
 import shutil
+import os
 
 
 def gzip_compressor(arquivo_origem):

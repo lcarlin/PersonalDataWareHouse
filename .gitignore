@@ -1,7 +1,12 @@
 # Compiled class files
 *.class
 *.db 
+*.pyc
+*cache*
 
+*/__pycache__/
+
+__pycache__/
 # Log files
 *.log
 
