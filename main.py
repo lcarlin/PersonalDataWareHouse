@@ -128,8 +128,6 @@ def main(param_file):
         dir_log = config['DIRECTORIES']['LOG_DIR']
         dir_db = config['DIRECTORIES']['DATABASE_DIR']
 
-        in_file = config['FILE_TYPES']['INPUT_FILE']
-        in_type = config['FILE_TYPES']['TYPE_IN']
         out_type = config['FILE_TYPES']['TYPE_OUT']
         out_db = config['FILE_TYPES']['OUT_DB_FILE']
         output_name = config['FILE_TYPES']['OUT_RPT_FILE']
@@ -164,8 +162,9 @@ def main(param_file):
         split_paymnt_table = config['SETTINGS']['SPLT_PAYMNT_TAB']
         out_table = config['SETTINGS']['OUT_RES_PMNT_TAB']
         monthly_summarie = config['SETTINGS']['MONTHLY_SUMMATIES']
+        in_file_name = config['FILES']['IN_FILE_NAME']
 
-        # NOVO02 = config.getboolean('settings', 'SelfDestruction')
+
     except FileNotFoundError:
         print(f"Configuration file {config_file} not found !")
         exit(1)
@@ -176,7 +175,7 @@ def main(param_file):
         print(e)
         exit(1)
 
-    input_file = dir_file_in + in_file + '.' + in_type
+    input_file = dir_file_in + in_file_name
     if overwrite_db:
         sqlite_database = dir_db + out_db + '.' + db_file_type
     else:
@@ -213,7 +212,7 @@ def main(param_file):
     if not is_log_empty and log_file_exists:
         last_run_date = log_file.readlines()[-1].split('|')[0]
     # end of LOG block
-    out_line = ">" + ("=" * 120) + "<"
+    out_line = ">" + ("=" * 130) + "<"
     print(out_line)
     print(f'Current Version         :-> {current_version}')
     print(f'Last RUN Date           :-> {last_run_date}')
@@ -228,7 +227,6 @@ def main(param_file):
     if run_loader:
         print(out_line)
         if not multithread:
-            # print('data_loader')
             dl.data_loader(sqlite_database, types_of_entries, general_entries_table, origem_dados, guiding_table,
                         input_file,
                         save_discarted_data, discarted_data_table)
