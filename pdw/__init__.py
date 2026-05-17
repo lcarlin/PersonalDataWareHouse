@@ -44,27 +44,41 @@
 #                       # remove  "  from descrição field              #
 # 2026-02-10 #  9.11.2  # Cosmetics: number of executions              # Carlin, Luiz A. .'.
 # 2026-05-17 # 10.1.0   # Modularização arquitetural incremental        # Carlin, Luiz A. .'.
-#                       # Este arquivo é uma facade de compatibilidade #
-#                       # O código foi migrado para o pacote pdw/      #
+#                       # Separação em pacote pdw/ por competência     #
 #############################################################################################
 # Current Version : 10.1.0
 #############################################################################################
-# Compatibility shim — mantido para compatibilidade com RunPDW.sh / RunPDW.ps1 / Run_PDW.bat
-# O código de negócio reside em pdw/
-# Para invocar diretamente o pacote: python -m pdw [config_file]
+# TODO: GUI Interface
+# TODO: Use config file as parameters? (done)
+# TODO: read encrypted excel file ?
+# TODO: Write encrypted Excel file ?
+# TODO: Remove parallel items (Done)
+# TODO: be able to use another databases ?
+# TODO: Refactor code to be able to use another types od database
+# TODO: Version Number in main module (done)
+# TODO: Hostname + version in log (done)
+# TODO: Put HistoricoGeral table name in Parameter file (done)
+# TODO: Put HistoricoAnual table name in Parameter file (done)
+# TODO: Create saparated output directories (log, report and database) (done)
+# TODO: Transiet data writer/export (done)
+# TODO:
+# TODO:
+# TODO:
 ####################################################################################
+Dependencies:
+pip install pandas
+pip install xlsxwriter
+pip install xlrd
+pip install openpyxl
+pip install sqlalchemy
+pip install numpy
+pip install pyinstaller
+
+pip install lxml
+pip install tabulate
+pip install tables0
+pyinstaller -F -i "G:\\Meu Drive\\PDW\\DataWareHouse02.ico" .\\XL_importer.v9.py
+
 """
 
-import sys
-
-from pdw.main import main
-
-if __name__ == '__main__':
-    input_param_file = ""
-
-    if len(sys.argv) == 2:
-        input_param_file = sys.argv[1]
-
-    main(input_param_file)
-
-# EOP
+__version__ = "10.1.0"
