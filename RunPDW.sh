@@ -59,7 +59,7 @@ else
         source "${envBin}"/activate
         cd "$dirScript" || exit
         # Executa o script Python em segundo plano
-        "$pythonExe" "$pythonScript" | tee -a ${SysOut_File} &
+        "$pythonExe" -u "$pythonScript" | tee -a ${SysOut_File} &
         wait $!
         deactivate
         echo "${hostAtual}" >  "${lastHost}"
