@@ -1,412 +1,618 @@
 # DIAGRAMA_ARQUITETURA.md
-## Personal Data Warehouse — Diagramas de Arquitetura
+## Personal Data Warehouse — Diagramas de Arquitetura Mermaid
 ### Versão 10.1.0
 
----
-
-## 1. Visão de Alto Nível — Fluxo de Dados
-
-```
-╔══════════════════════════════════════════════════════════════════════════════════╗
-║                          PERSONAL DATA WAREHOUSE                                ║
-║                               Fluxo Principal                                   ║
-╚══════════════════════════════════════════════════════════════════════════════════╝
-
-  ENTRADA                    PROCESSAMENTO                      SAÍDA
-  ───────                    ──────────────                     ─────
-
-  PDW.xlsx              ┌─────────────────────┐         PDW_REPORTS.v2.xlsx
-  ┌───────────┐         │                     │         ┌────────────────────┐
-  │  GUIDING  │────────▶│    ETL ENGINE       │────────▶│  Múltiplas abas    │
-  │  PARCEL.  │         │   (pdw/etl/)        │         │  (queries do YAML) │
-  │  TIPOS    │         │                     │         └────────────────────┘
-  │  Conta_A  │         └──────────┬──────────┘
-  │  Conta_B  │                    │                    LANCAMENTOS_GERAIS.FULL.v2
-  │  Conta_C  │                    ▼                    ┌────────────────────┐
-  └───────────┘         ┌─────────────────────┐         │  .csv (UTF-8-sig)  │
-                        │   PDW.db (SQLite3)  │────────▶│  .json.gz          │
-  PersonalDataWareHouse │                     │         │  .xml.gz           │
-  .cfg                  │  LANCAMENTOS_GERAIS │         └────────────────────┘
-  ┌───────────┐         │  HistoricoGeral     │
-  │  [DIR]    │────────▶│  HistoricoAnual     │         PDW.lnx.log
-  │  [FILES]  │         │  Resumidos          │         ┌────────────────────┐
-  │  [SETTINGS│         │  contagem_diaria    │────────▶│  execution log     │
-  └───────────┘         │  (+ tabelas dinâm.) │         │  (append, por run) │
-                        └─────────────────────┘         └────────────────────┘
-  PDW_QUERIES.yaml
-  ┌───────────┐
-  │ queries   │────────────────────────────────────────▶ (incluso no xlsx)
-  │ _padrao   │
-  │ _gera_hist│
-  └───────────┘
-```
+> Todos os diagramas usam sintaxe **Mermaid** e são renderizados automaticamente no GitHub.
 
 ---
 
-## 2. Diagrama de Componentes (C4 — Nível 2)
+## 1. Diagrama de Módulos
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           SISTEMA PDW                                        │
-│                                                                             │
-│  ┌──────────────────────┐         ┌──────────────────────────────────────┐  │
-│  │   ENTRY POINTS       │         │         CORE PIPELINE                │  │
-│  │                      │         │                                      │  │
-│  │  PersonalDataWareHouse│────────▶│  pdw/core/orchestrator.py           │  │
-│  │  .py (facade)        │         │  ┌─────────────────────────────────┐ │  │
-│  │                      │         │  │  run_pipeline(param_file)       │ │  │
-│  │  pdw/main.py         │         │  │  1. load_config()               │ │  │
-│  │  RunPDW.sh           │         │  │  2. open_log()                  │ │  │
-│  │  RunPDW.ps1          │         │  │  3. new_data_loader() ?         │ │  │
-│  │  Run_PDW.bat         │         │  │  4. create_pivot_history() ?    │ │  │
-│  └──────────────────────┘         │  │  5. create_dinamic_reports() ?  │ │  │
-│                                   │  │  6. monthly_summaries()  ?      │ │  │
-│  ┌──────────────────────┐         │  │  7. general_entries_...() ?     │ │  │
-│  │  CONFIGURATION       │         │  │  8. split_paymnt_resume() ?     │ │  │
-│  │                      │         │  │  9. xlsx_report_generator() ?   │ │  │
-│  │  .cfg (INI)  ────────┼─────────┼─▶│  10. finalize_log()             │ │  │
-│  │  .yaml (SQL) ────────┼─────────┼─▶│  (* = condicional por flag)     │ │  │
-│  └──────────────────────┘         │  └─────────────────────────────────┘ │  │
-│                                   └──────────────────────────────────────┘  │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                      CAMADAS DE SERVIÇO                             │   │
-│  │                                                                     │   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌──────────────┐  ┌──────────┐ │   │
-│  │  │   ETL       │  │ ANALYTICS   │  │  REPORTS     │  │  UTILS   │ │   │
-│  │  │             │  │             │  │              │  │          │ │   │
-│  │  │ loader.py   │  │ pivot.py    │  │ exporter.py  │  │compress. │ │   │
-│  │  │ sanitizer.py│  │ totals.py   │  │ xlsx_gen.py  │  │xml_utils │ │   │
-│  │  └──────┬──────┘  └──────┬──────┘  └──────┬───────┘  │localiz. │ │   │
-│  │         │                │                │           └──────────┘ │   │
-│  │         ▼                ▼                ▼                        │   │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │   │
-│  │  │                  DATABASE (SQLite3)                         │  │   │
-│  │  │            pdw/database/operations.py                       │  │   │
-│  │  └─────────────────────────────────────────────────────────────┘  │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────┘
+Estrutura completa do pacote `pdw/` agrupada por responsabilidade.
+
+```mermaid
+graph LR
+    subgraph ENTRY["Entry Points"]
+        FAC["PersonalDataWareHouse.py\n(facade)"]
+        PDWM["pdw/main.py"]
+        SH["RunPDW.sh / RunPDW.ps1 / Run_PDW.bat"]
+    end
+
+    subgraph CORE_G["Core"]
+        ORCH["pdw/core/orchestrator.py"]
+        CFG["pdw/config/loader.py"]
+        LOG["pdw/infrastructure/logging.py"]
+        INIT["pdw/__init__.py\n__version__ = 10.1.0"]
+    end
+
+    subgraph ETL_G["ETL"]
+        ETLL["pdw/etl/loader.py"]
+        ETLS["pdw/etl/sanitizer.py"]
+        DBOP["pdw/database/operations.py"]
+    end
+
+    subgraph ANA_G["Analytics"]
+        PIV["pdw/analytics/pivot.py"]
+        TOT["pdw/analytics/totals.py"]
+    end
+
+    subgraph REP_G["Reports"]
+        EXP["pdw/reports/exporter.py"]
+        XLS["pdw/reports/xlsx_generator.py"]
+        NR["pdw/reports/novos_relatorios.py"]
+    end
+
+    subgraph UTIL_G["Utils"]
+        COMP["pdw/utils/compression.py"]
+        XML["pdw/utils/xml_utils.py"]
+        LOC["pdw/utils/localization.py"]
+        TR["pdw/utils/transient_data.py"]
+    end
+
+    subgraph COMPAT_G["Compat + Legacy"]
+        COM["pdw/compat/__init__.py"]
+        LEG["legacy/PersonalDataWareHouse.9.11.2.py"]
+    end
+
+    SH --> FAC
+    FAC --> PDWM
+    PDWM --> ORCH
+    ORCH --> CFG
+    ORCH --> LOG
+    ORCH --> ETLL
+    ORCH --> PIV
+    ORCH --> TOT
+    ORCH --> EXP
+    ORCH --> XLS
+    ETLL --> ETLS
+    ETLL --> DBOP
+    ETLS --> LOC
+    ETLS --> DBOP
+    EXP --> COMP
+    EXP --> XML
+    XLS --> TOT
+    CFG --> INIT
+    COM -.-> ORCH
 ```
 
 ---
 
-## 3. Fluxo Detalhado do ETL
+## 2. Diagrama de Dependências
 
-```
-new_data_loader(...)
-       │
-       ▼
-  [1] sqlite3.connect(db_file)
-       │
-       ▼
-  [2] read_guiding_sheet(excel_file, "GUIDING")
-       │    └──▶ pd.ExcelFile(excel).parse("GUIDING")
-       │         Retorna: DataFrame com TABLE_NAME, ACCOUNTING, LOADABLE
-       ▼
-  [3] table_droppator(cursor, "LANCAMENTOS_GERAIS")
-       │    └──▶ DROP TABLE IF EXISTS LANCAMENTOS_GERAIS
-       ▼
-  [4] Para cada linha do GUIDING:
-       │
-       ├── LOADABLE == 'X' e ACCOUNTING == 'X'
-       │    └──▶ process_accounting_sheet(excel, sheet, origem)
-       │              └──▶ pd.read_excel(excel, sheet)
-       │                   └──▶ seleciona: Data, TIPO, DESCRICAO, Credito, Debito
-       │                   └──▶ adiciona coluna Origem = sheet
-       │                   └──▶ retorna (DataFrame, n_linhas)
-       │              └──▶ all_entries.append(df)
-       │
-       └── LOADABLE == 'X' e ACCOUNTING != 'X'
-            └──▶ process_non_accounting_sheet(excel, sheet, conn)
-                      └──▶ pd.read_excel → df.to_sql(sheet, conn)
-       ▼
-  [5] pd.concat(all_entries) → general_entries_df
-       ▼
-  [6] sanitize_entries_dataframe(df, remove_nulls=True)
-       │    ├── dropna(['TIPO', 'Data'])
-       │    ├── add_temporal_columns(df)
-       │    │       insert: DIA_SEMANA, Mes, Ano, MES_EXTENSO, AnoMes
-       │    ├── sanitize_financial_columns(df)
-       │    │       Credito/Debito → pd.to_numeric().round(2).fillna(0)
-       │    ├── enrich_dataframe_with_dates(df)
-       │    │       MES_EXTENSO ← dt.month.map(get_month_names())
-       │    │       DIA_SEMANA  ← dt.dayofweek.map(get_weekday_names())
-       │    │       Mes, Ano, AnoMes ← dt.strftime()
-       │    └── clean_description_text(df['DESCRICAO'])
-       │             ;,→|  ∴→.'.  ś→s  "→''  strip()
-       ▼
-  [7] save_dataframe_to_database(df, conn, "LANCAMENTOS_GERAIS")
-       │    └──▶ sort_by_date → df.to_sql("LANCAMENTOS_GERAIS", conn)
-       ▼
-  [8] conn.commit()
-       ▼
-  [9] data_correjeitor(cursor, types_sheet, entries_table, ...)
-       │    ├── (opcional) cria discarted_data com registros nulos
-       │    ├── DELETE FROM TiposLancamentos WHERE Código/Descrição IS NULL
-       │    ├── DELETE FROM Parcelamentos WHERE DATA/Tipo IS NULL
-       │    ├── DROP VIEW IF EXISTS Origens
-       │    └── CREATE VIEW Origens AS SELECT TABLE_NAME FROM GUIDING WHERE LOADABLE='X' AND ACCOUNTING='X'
-       ▼
-  [10] conn.commit() → conn.close()
+Grafo de importações entre módulos. Setas indicam "importa de". Sem ciclos.
+
+```mermaid
+graph TD
+    MAIN["pdw/main.py"]
+    ORCH["pdw/core/orchestrator.py"]
+    CFG["pdw/config/loader.py"]
+    INIT["pdw/__init__.py"]
+    LOG["pdw/infrastructure/logging.py"]
+    LOADER["pdw/etl/loader.py"]
+    SANIT["pdw/etl/sanitizer.py"]
+    OPS["pdw/database/operations.py"]
+    PIV["pdw/analytics/pivot.py"]
+    TOT["pdw/analytics/totals.py"]
+    EXP["pdw/reports/exporter.py"]
+    XLS["pdw/reports/xlsx_generator.py"]
+    NR["pdw/reports/novos_relatorios.py"]
+    COMP["pdw/utils/compression.py"]
+    XML["pdw/utils/xml_utils.py"]
+    LOC["pdw/utils/localization.py"]
+
+    MAIN --> ORCH
+    ORCH --> CFG
+    ORCH --> LOG
+    ORCH --> LOADER
+    ORCH --> PIV
+    ORCH --> TOT
+    ORCH --> EXP
+    ORCH --> XLS
+    CFG --> INIT
+    LOADER --> SANIT
+    LOADER --> OPS
+    SANIT --> LOC
+    SANIT --> OPS
+    EXP --> COMP
+    EXP --> XML
+    XLS --> TOT
+
+    style INIT fill:#f9f,stroke:#333
+    style ORCH fill:#bbf,stroke:#333
+    style OPS fill:#bfb,stroke:#333
 ```
 
 ---
 
-## 4. Fluxo de Geração de Relatórios
+## 3. Diagrama de Fluxo de Execução
 
-```
-xlsx_report_generator(...)
-       │
-       ▼
-  [1] yaml.safe_load(yaml_queries_file)
-       │    Carrega: queries_gera_hist[], queries_padrao[]
-       ▼
-  [2] totalizador_diario(db, LANCAMENTOS_GERAIS, contagem_diaria)
-       │    └──▶ groupby('Data').size().cumsum() → to_sql
-       ▼
-  [3] sqlite3.connect(db_file)
-       ▼
-  [4] Monta lista_consultas:
-       │
-       ├── if CREATE_PIVOT=True:
-       │    └── queries_gera_hist (com placeholders {full_hist}, {anual_hist}, ...)
-       │
-       ├── queries_padrao (sempre)
-       │
-       └── if CREATE_PIVOT=True e RUN_DINAMIC_REPORT=True:
-            └── SELECT * FROM {dyn_rep_tab} → para cada linha: SELECT * FROM DEST_TABLE
-       ▼
-  [5] pd.ExcelWriter(file_full_path, engine='xlsxwriter')
-       │    (se RPT_SINGLE_FILE=True)
-       ▼
-  [6] Para cada (sql, sheet_name):
-       │    └──▶ pd.read_sql(sql, connection)
-       │    └──▶ df.to_excel(writer, sheet_name=sheet_name)
-       ▼
-  [7] xlsx_writer.close() → connection.close()
-```
+Pipeline completo com todas as ramificações condicionais.
 
----
+```mermaid
+flowchart TD
+    A([Início]) --> CLI["CLI: python PersonalDataWareHouse.py"]
+    CLI --> PDW_MAIN["pdw/main.py :: main()"]
+    PDW_MAIN --> PIPE["orchestrator.py :: run_pipeline()"]
 
-## 5. Schema do Banco de Dados SQLite
+    PIPE --> LCFG["load_config(param_file)"]
+    LCFG --> VER{Versão\ncompatível?}
+    VER -- Não --> E1([exit 1])
+    VER -- Sim --> DIRS{Diretórios\nexistem?}
+    DIRS -- Não --> E2([exit 1])
+    DIRS -- Sim --> OPLOG["open_log()"]
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          PDW.db — Schema Completo                            │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  LANCAMENTOS_GERAIS (tabela principal)                                      │
-│  ┌──────────────┬─────────────────────────────────────────────────────┐    │
-│  │ Data         │ TEXT (YYYY-MM-DD) — data da movimentação            │    │
-│  │ DIA_SEMANA   │ TEXT — nome do dia em PT-BR                         │    │
-│  │ TIPO         │ TEXT — categoria (de TiposLancamentos)              │    │
-│  │ DESCRICAO    │ TEXT — descrição da movimentação                    │    │
-│  │ Credito      │ REAL — valor creditado (≥0)                        │    │
-│  │ Debito       │ REAL — valor debitado (≥0)                         │    │
-│  │ Mes          │ TEXT — "MM"                                         │    │
-│  │ Ano          │ TEXT — "YYYY"                                       │    │
-│  │ MES_EXTENSO  │ TEXT — ex: "01-Janeiro"                            │    │
-│  │ AnoMes       │ TEXT — "YYYY/MM"                                   │    │
-│  │ Origem       │ TEXT — nome da aba Excel de origem                 │    │
-│  └──────────────┴─────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  GUIDING (configuração de carga)                                            │
-│  ┌──────────────┬─────────────────────────────────────────────────────┐    │
-│  │ TABLE_NAME   │ TEXT — nome da aba Excel                            │    │
-│  │ ACCOUNTING   │ TEXT — 'X' se é contábil                           │    │
-│  │ LOADABLE     │ TEXT — 'X' se deve ser carregada                   │    │
-│  └──────────────┴─────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  TiposLancamentos (categorias)                                              │
-│  ┌──────────────┬─────────────────────────────────────────────────────┐    │
-│  │ Código       │ TEXT — código interno                               │    │
-│  │ Descrição    │ TEXT — nome exibido                                 │    │
-│  └──────────────┴─────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  PARCELAMENTOS (compras parceladas)                                         │
-│  ┌──────────────┬─────────────────────────────────────────────────────┐    │
-│  │ Data         │ TEXT — data da parcela                              │    │
-│  │ Tipo Lançamento│TEXT — categoria                                   │    │
-│  │ Debito       │ REAL — valor da parcela                            │    │
-│  │ (outras)     │ — colunas da planilha Excel                        │    │
-│  └──────────────┴─────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  HistoricoGeral / HistoricoGeral_QTD (pivot mensal)                         │
-│  ┌──────────────┬─────────────────────────────────────────────────────┐    │
-│  │ AnoMes       │ TEXT — "YYYY/MM" (índice)                          │    │
-│  │ <Categoria1> │ REAL — soma/contagem de débitos da categoria        │    │
-│  │ <Categoria2> │ REAL — (colunas dinâmicas = TiposLancamentos)      │    │
-│  │ ...          │                                                     │    │
-│  └──────────────┴─────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  HistoricoAnual / HistoricoAnual_QTD (pivot anual)                          │
-│  ┌──────────────┬─────────────────────────────────────────────────────┐    │
-│  │ Ano          │ TEXT — "YYYY" (índice)                              │    │
-│  │ <Categoria>  │ REAL — (mesma estrutura do mensal)                 │    │
-│  └──────────────┴─────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  contagem_diaria (progresso diário)                                         │
-│  ┌──────────────┬─────────────────────────────────────────────────────┐    │
-│  │ Data         │ TEXT                                                │    │
-│  │ Contagem Acumulada│INTEGER — total acumulado até esta data        │    │
-│  └──────────────┴─────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  Resumo_Parcelamentos / Resumido_In_Out / _ANUAL / _FULL                    │
-│  (tabelas de sumarização — ver INVENTARIO_API.md para schema completo)      │
-│                                                                             │
-│  VIEW: Origens                                                              │
-│  ┌──────────────┬─────────────────────────────────────────────────────┐    │
-│  │ nome         │ TEXT — TABLE_NAME de GUIDING onde LOADABLE='X'      │    │
-│  │              │        e ACCOUNTING='X'                             │    │
-│  └──────────────┴─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
+    OPLOG --> MT{MULTITHREADING\n= True?}
+    MT -- Sim --> E3([exit 1])
+    MT -- Não --> RLD{RUN_DATA\nLOADER?}
+
+    RLD -- Sim --> ETL["new_data_loader()"]
+    ETL --> READ["read_guiding_sheet()"]
+    READ --> LOOP["Para cada aba no GUIDING"]
+    LOOP --> ACCNT{ACCOUNTING\n= X?}
+    ACCNT -- Sim --> PACC["process_accounting_sheet()"]
+    ACCNT -- Não --> PNACC["process_non_accounting_sheet()"]
+    PACC --> CONCAT["pd.concat(all_entries)"]
+    PNACC --> CONCAT
+    CONCAT --> SANIT["sanitize_entries_dataframe()"]
+    SANIT --> SAVDB["save_dataframe_to_database()"]
+    SAVDB --> CORR["data_correjeitor()"]
+    CORR --> PIV_Q{CREATE\nPIVOT?}
+    RLD -- Não --> PIV_Q
+
+    PIV_Q -- Sim --> PIVO["create_pivot_history()"]
+    PIVO --> DIN_Q{RUN_DINAMIC\nREPORT?}
+    DIN_Q -- Sim --> DINR["create_dinamic_reports()"]
+    DINR --> RPT_Q{RUN\nREPORTS?}
+    DIN_Q -- Não --> RPT_Q
+    PIV_Q -- Não --> RPT_Q
+
+    RPT_Q -- Sim --> SUMM["monthly_summaries()"]
+    SUMM --> EXPRT["general_entries_file_exportator()"]
+    EXPRT --> SPLIT["split_paymnt_resume()"]
+    SPLIT --> XLSX["xlsx_report_generator()"]
+    XLSX --> FLOG["finalize_log()"]
+    RPT_Q -- Não --> FLOG
+
+    FLOG --> DONE([exit 0])
 ```
 
 ---
 
-## 6. Grafo de Dependências entre Módulos
+## 4. Diagrama de Integração Externa
 
-```
-                    pdw/__init__.py
-                         │
-                         ▼
-              pdw/config/loader.py
-                         │
-                    ┌────┴────────────────────────┐
-                    ▼                             ▼
-         pdw/infrastructure/           pdw/core/orchestrator.py
-              logging.py                         │
-                                    ┌────────────┼────────────┐
-                                    ▼            ▼            ▼
-                              pdw/etl/    pdw/analytics/ pdw/reports/
-                               loader.py   pivot.py      exporter.py
-                                  │        totals.py     xlsx_generator.py
-                                  │            │              │
-                             ┌────┤            │              │
-                             ▼    ▼            │              │
-                      sanitizer. database/     │              │
-                      py         operations.py │              │
-                          │                    │              │
-                          ▼                    ▼              ▼
-                    pdw/utils/           pdw/analytics/  pdw/utils/
-                    localization.py       totals.py      compression.py
-                                                         xml_utils.py
+Todas as dependências de arquivos e sistemas externos ao processo PDW.
 
-Sentido das setas: "depende de"
-Nenhum ciclo presente.
-```
+```mermaid
+flowchart LR
+    subgraph INPUT["Entradas"]
+        EXCEL["PDW.xlsx\nArquivo Excel de entrada"]
+        CFG_F["PersonalDataWareHouse.cfg\nConfiguração INI"]
+        YAML_F["PDW_QUERIES.yaml\nQueries SQL para relatórios"]
+    end
 
----
+    subgraph PROCESS["Personal Data Warehouse"]
+        direction TB
+        ETL_P["ETL Engine\npdw/etl/loader.py\npdw/etl/sanitizer.py"]
+        DB_P[("PDW.db\nSQLite3")]
+        ANA_P["Analytics Engine\npdw/analytics/"]
+        REP_P["Report Engine\npdw/reports/"]
+    end
 
-## 7. Diagrama de Sequência — Execução Completa
+    subgraph OUTPUT["Saídas"]
+        XLSX_O["PDW_REPORTS.v2.xlsx\nRelatório principal"]
+        CSV_O["*.YYYYMMDD.HHMMSS.csv\nExportação CSV UTF-8"]
+        JSON_O["*.YYYYMMDD.HHMMSS.json.gz\nExportação JSON gzip"]
+        XML_O["*.YYYYMMDD.HHMMSS.xml.gz\nExportação XML gzip"]
+        LOG_O["PDW.lnx.log\nLog de execução pipe-delimitado"]
+    end
 
-```
-Usuário/Scheduler
-     │
-     │  python PersonalDataWareHouse.py [config.cfg]
-     ▼
-PersonalDataWareHouse.py (shim)
-     │  from pdw.main import main; main(param_file)
-     ▼
-pdw/main.py::main()
-     │  run_pipeline(param_file)
-     ▼
-pdw/core/orchestrator.py::run_pipeline()
-     │
-     ├──▶ config/loader.py::load_config()  ──▶  configparser.read(cfg)
-     │         │                                      │
-     │         └─ retorna dict cfg                    └─▶ exit(1) se versão errada
-     │
-     ├──▶ infrastructure/logging.py::open_log()
-     │         └─ retorna (file_handle, n_runs, last_date)
-     │
-     ├── [se RUN_DATA_LOADER=True]
-     │    └──▶ etl/loader.py::new_data_loader()
-     │              ├──▶ database/operations.py::table_droppator()
-     │              ├──▶ etl/loader.py::read_guiding_sheet()
-     │              ├──▶ [para cada sheet] process_accounting_sheet() / process_non_accounting_sheet()
-     │              ├──▶ etl/sanitizer.py::sanitize_entries_dataframe()
-     │              │        ├──▶ utils/localization.py::get_month_names()
-     │              │        └──▶ utils/localization.py::get_weekday_names()
-     │              ├──▶ database/operations.py::save_dataframe_to_database()
-     │              └──▶ etl/sanitizer.py::data_correjeitor()
-     │                        └──▶ database/operations.py::table_droppator()
-     │
-     ├── [se CREATE_PIVOT=True]
-     │    ├──▶ analytics/pivot.py::create_pivot_history()
-     │    └── [se RUN_DINAMIC_REPORT=True]
-     │         └──▶ analytics/pivot.py::create_dinamic_reports()
-     │
-     ├── [se RUN_REPORTS=True]
-     │    ├──▶ analytics/totals.py::monthly_summaries()
-     │    ├──▶ reports/exporter.py::general_entries_file_exportator()
-     │    │        ├──▶ utils/compression.py::gzip_compressor()
-     │    │        └──▶ utils/xml_utils.py::dataframe_to_xml()
-     │    ├──▶ analytics/totals.py::split_paymnt_resume()
-     │    └──▶ reports/xlsx_generator.py::xlsx_report_generator()
-     │              └──▶ analytics/totals.py::totalizador_diario()
-     │
-     └──▶ infrastructure/logging.py::finalize_log()
+    EXCEL --> ETL_P
+    CFG_F --> ETL_P
+    CFG_F --> REP_P
+    YAML_F --> REP_P
+    ETL_P --> DB_P
+    DB_P --> ANA_P
+    ANA_P --> DB_P
+    DB_P --> REP_P
+    REP_P --> XLSX_O
+    REP_P --> CSV_O
+    REP_P --> JSON_O
+    REP_P --> XML_O
+    ETL_P --> LOG_O
+    REP_P --> LOG_O
 ```
 
 ---
 
-## 8. Diagrama de Estado do Pipeline
+## 5. Diagrama de Camadas
 
+Arquitetura em camadas do sistema. Dependências fluem de cima para baixo.
+
+```mermaid
+graph TB
+    subgraph L1["Camada 1 — Entry Point"]
+        EP1["PersonalDataWareHouse.py (facade)"]
+        EP2["pdw/main.py"]
+        EP3["RunPDW.sh / RunPDW.ps1 / Run_PDW.bat"]
+    end
+
+    subgraph L2["Camada 2 — Orquestração"]
+        OR1["pdw/core/orchestrator.py\nrun_pipeline()"]
+        OR2["pdw/config/loader.py\nload_config()"]
+        OR3["pdw/infrastructure/logging.py\nopen_log() / finalize_log()"]
+    end
+
+    subgraph L3["Camada 3 — Domínio de Negócio"]
+        D1["pdw/etl/loader.py\nnew_data_loader()"]
+        D2["pdw/etl/sanitizer.py\nsanitize_entries_dataframe()"]
+        D3["pdw/analytics/pivot.py\ncreate_pivot_history()"]
+        D4["pdw/analytics/totals.py\nmonthly_summaries()"]
+        D5["pdw/reports/exporter.py\ngeneral_entries_file_exportator()"]
+        D6["pdw/reports/xlsx_generator.py\nxlsx_report_generator()"]
+    end
+
+    subgraph L4["Camada 4 — Infraestrutura Técnica"]
+        I1["pdw/database/operations.py\ntable_droppator() / save_dataframe_to_database()"]
+        I2["pdw/utils/compression.py\ngzip_compressor()"]
+        I3["pdw/utils/xml_utils.py\ndataframe_to_xml()"]
+        I4["pdw/utils/localization.py\nget_month_names() / get_weekday_names()"]
+    end
+
+    subgraph L5["Camada 5 — Recursos Externos"]
+        EX1[("PDW.db — SQLite3")]
+        EX2["PDW.xlsx — Excel"]
+        EX3["PersonalDataWareHouse.cfg — INI"]
+        EX4["PDW_QUERIES.yaml — YAML"]
+        EX5["Sistema de Arquivos — log / output"]
+    end
+
+    L1 --> L2
+    L2 --> L3
+    L3 --> L4
+    L4 --> L5
 ```
-                    ┌─────────────┐
-                    │   INÍCIO    │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │  LER CONFIG │◀── exit(1) se arquivo não existe
-                    └──────┬──────┘◀── exit(1) se versão errada
-                           │       ◀── exit(1) se diretório não existe
-                    ┌──────▼──────┐
-                    │  ABRIR LOG  │
-                    └──────┬──────┘
-                           │
-                  ┌────────┴────────┐
-                  │ RUN_DATA_LOADER?│
-                  └────────┬────────┘
-              Sim ◀─────────┤─────────▶ Não
-               │            │            │
-               ▼            │            │
-        ┌──────────┐         │            │
-        │  LOADER  │         │            │
-        └─────┬────┘         │            │
-              │              │            │
-              └──────────────┤            │
-                             │◀───────────┘
-                    ┌────────┴────────┐
-                    │ CREATE_PIVOT?   │
-                    └────────┬────────┘
-              Sim ◀───────────┤──────────▶ Não
-               │             │              │
-               ▼             │              │
-        ┌──────────┐          │              │
-        │  PIVOT   │          │              │
-        └─────┬────┘          │              │
-              │               │              │
-              └───────────────┤              │
-                             │◀─────────────┘
-                    ┌────────┴────────┐
-                    │ RUN_REPORTS?    │
-                    └────────┬────────┘
-              Sim ◀───────────┤──────────▶ Não
-               │             │              │
-               ▼             │              │
-        ┌──────────┐          │              │
-        │ REPORTS  │          │              │
-        └─────┬────┘          │              │
-              │               │              │
-              └───────────────┤              │
-                             │◀─────────────┘
-                    ┌────────┴────────┐
-                    │ FECHAR LOG      │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │    FIM (exit 0) │
-                    └─────────────────┘
+
+---
+
+## 6. Diagrama de Logging
+
+Ciclo de vida completo do arquivo de log em uma execução.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Orch as orchestrator.py
+    participant LogM as infrastructure/logging.py
+    participant FS as Sistema de Arquivos
+    participant Pipeline as Pipeline (ETL + Reports)
+
+    Orch->>LogM: open_log(log_file_cfg)
+    LogM->>FS: os.path.isfile(log_file_cfg)
+
+    alt Arquivo não existe
+        LogM->>FS: open(path, 'w') — cria arquivo
+        FS-->>LogM: escreve "New LOG created at DD/MM/YYYY HH:MM:SS"
+    end
+
+    LogM->>FS: open(path, 'r+')
+    LogM->>FS: sum(1 for line in file) → number_of_runs
+    LogM->>FS: readlines()[-1].split('|')[0] → last_run_date
+    LogM-->>Orch: (file_handle, number_of_runs, last_run_date)
+
+    Note over Orch: start = time.time()
+
+    Orch->>Pipeline: executa ETL + Analytics + Reports
+    Pipeline-->>Orch: concluído
+
+    Note over Orch: elapsed = round(time.time() - start, 2)
+    Note over Orch: log_line = "YYYY/MM/DD HH:MM:SS | Version: X | Host: Y | OS: Z | Runs: N | Time: Ts | Last: D"
+
+    Orch->>LogM: finalize_log(file_handle, log_line)
+    LogM->>FS: file_handle.write(log_line)
+    LogM->>FS: file_handle.close()
+
+    Note over FS: Linha adicionada ao final do arquivo
+```
+
+---
+
+## 7. Diagrama de Inicialização da Aplicação
+
+Sequência completa desde a invocação CLI até o início do pipeline.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User as Usuário / Scheduler
+    participant Shell as RunPDW.sh
+    participant Facade as PersonalDataWareHouse.py
+    participant Main as pdw/main.py
+    participant Orch as pdw/core/orchestrator.py
+    participant Cfg as pdw/config/loader.py
+    participant Log as pdw/infrastructure/logging.py
+    participant FS as Sistema de Arquivos
+
+    User->>Shell: bash RunPDW.sh [config.cfg]
+    Shell->>Shell: verifica lock file (mkdir PDW_lock)
+    Shell->>Facade: python PersonalDataWareHouse.py [config.cfg]
+
+    Facade->>Main: from pdw.main import main
+    Main->>Orch: run_pipeline(param_file)
+
+    Orch->>Cfg: load_config(param_file)
+    Cfg->>FS: open(PersonalDataWareHouse.cfg)
+    Cfg->>Cfg: configparser.read_file(cfg)
+    Cfg->>Cfg: verifica CURRENT_VERSION == pdw.__version__
+
+    alt Versão incompatível
+        Cfg->>User: print("version does not Match")
+        Cfg->>Orch: sys.exit(1)
+    end
+
+    Cfg-->>Orch: dict com 35 parâmetros de configuração
+
+    Orch->>FS: os.path.exists(DIR_IN)
+
+    alt DIR_IN não existe
+        Orch->>User: print("Input Directory does not exists")
+        Orch->>User: sys.exit(1)
+    end
+
+    Orch->>Log: open_log(log_file_cfg)
+    Log-->>Orch: (file_handle, number_of_runs, last_run_date)
+
+    Orch->>Orch: verifica MULTITHREADING
+
+    alt MULTITHREADING = True
+        Orch->>User: sys.exit(1)
+    end
+
+    Note over Orch: Pipeline pronto para execução
+    Orch->>Orch: executa fases conforme flags do .cfg
+```
+
+---
+
+## 8. Diagrama de Endpoints
+
+Todas as 26 funções públicas agrupadas por módulo responsável.
+
+```mermaid
+classDiagram
+    class Orchestrator {
+        <<pdw.core.orchestrator>>
+        +run_pipeline(param_file)
+    }
+
+    class ConfigLoader {
+        <<pdw.config.loader>>
+        +load_config(param_file) dict
+    }
+
+    class LoggingModule {
+        <<pdw.infrastructure.logging>>
+        +open_log(log_file_cfg) tuple
+        +finalize_log(log_file, log_line)
+    }
+
+    class EtlLoader {
+        <<pdw.etl.loader>>
+        +new_data_loader(db, types, entries, origin, guiding, excel, save, udt)
+        +read_guiding_sheet(excel, sheet) DataFrame
+        +process_accounting_sheet(excel, sheet, col) tuple
+        +process_non_accounting_sheet(excel, sheet, conn) int
+    }
+
+    class Sanitizer {
+        <<pdw.etl.sanitizer>>
+        +sanitize_entries_dataframe(df, remove_nulls) DataFrame
+        +data_correjeitor(conexao, types, entries, save, udt)
+    }
+
+    class DatabaseOps {
+        <<pdw.database.operations>>
+        +table_droppator(conexao, table_name)
+        +save_dataframe_to_database(df, conn, table, sort) int
+        +sort_dataframe_by_date(df, ascending) DataFrame
+    }
+
+    class PivotAnalytics {
+        <<pdw.analytics.pivot>>
+        +create_pivot_history(db, entries, full_hist, anual_hist)
+        +create_dinamic_reports(db, excel, din_guiding)
+    }
+
+    class TotalsAnalytics {
+        <<pdw.analytics.totals>>
+        +totalizador_diario(db, entries, dayly)
+        +monthly_summaries(db, entries, out, name, dir, multi)
+        +split_paymnt_resume(db, split, out, name, dir, multi)
+    }
+
+    class Exporter {
+        <<pdw.reports.exporter>>
+        +general_entries_file_exportator(db, entries, name, dir, type, others)
+    }
+
+    class XlsxGenerator {
+        <<pdw.reports.xlsx_generator>>
+        +xlsx_report_generator(db, yaml, name, dir, multi)
+    }
+
+    class NovosRelatorios {
+        <<pdw.reports.novos_relatorios>>
+        +gerar_todos_relatorios_integrado(db, entries, dir)
+    }
+
+    class Utils {
+        <<pdw.utils>>
+        +gzip_compressor(source, dest)
+        +dataframe_to_xml(df, root_tag, row_tag) str
+        +transient_data_exportator(db, dir, ext, name, table, col)
+        +get_month_names() dict
+        +get_weekday_names() dict
+    }
+
+    Orchestrator --> ConfigLoader : usa
+    Orchestrator --> LoggingModule : usa
+    Orchestrator --> EtlLoader : usa
+    Orchestrator --> PivotAnalytics : usa
+    Orchestrator --> TotalsAnalytics : usa
+    Orchestrator --> Exporter : usa
+    Orchestrator --> XlsxGenerator : usa
+    EtlLoader --> Sanitizer : usa
+    EtlLoader --> DatabaseOps : usa
+    Sanitizer --> DatabaseOps : usa
+    Sanitizer --> Utils : usa
+    Exporter --> Utils : usa
+    XlsxGenerator --> TotalsAnalytics : usa
+```
+
+---
+
+## 9. Diagrama de Persistência
+
+Schema completo do banco SQLite com relacionamentos lógicos entre tabelas.
+
+```mermaid
+erDiagram
+    LANCAMENTOS_GERAIS {
+        text Data
+        text DIA_SEMANA
+        text TIPO
+        text DESCRICAO
+        real Credito
+        real Debito
+        text Mes
+        text Ano
+        text MES_EXTENSO
+        text AnoMes
+        text Origem
+    }
+
+    TiposLancamentos {
+        text Codigo
+        text Descricao
+    }
+
+    GUIDING {
+        text TABLE_NAME
+        text ACCOUNTING
+        text LOADABLE
+    }
+
+    PARCELAMENTOS {
+        text Data
+        text TipoLancamento
+        real Debito
+    }
+
+    HistoricoGeral {
+        text AnoMes
+        real valores_por_categoria
+    }
+
+    HistoricoAnual {
+        text Ano
+        real valores_por_categoria
+    }
+
+    contagem_diaria {
+        text Data
+        int ContagemAcumulada
+    }
+
+    Resumo_Parcelamentos {
+        text AnoMes
+        int Quantidade
+        real Valor
+        real Diferenca
+    }
+
+    Resumido_In_Out {
+        text AnoMes
+        real TotalCredito
+        real TotalDebito
+    }
+
+    Origens_VIEW {
+        text nome
+    }
+
+    LANCAMENTOS_GERAIS }o--|| TiposLancamentos : "TIPO referencia Codigo"
+    LANCAMENTOS_GERAIS }o--|| GUIDING : "Origem referencia TABLE_NAME"
+    GUIDING ||--o| Origens_VIEW : "gera view filtrada"
+    LANCAMENTOS_GERAIS ||--o{ HistoricoGeral : "pivot por AnoMes"
+    LANCAMENTOS_GERAIS ||--o{ HistoricoAnual : "pivot por Ano"
+    LANCAMENTOS_GERAIS ||--o{ contagem_diaria : "contagem acumulada"
+    PARCELAMENTOS ||--o{ Resumo_Parcelamentos : "resume por mes"
+    LANCAMENTOS_GERAIS ||--o{ Resumido_In_Out : "sumariza credito debito"
+```
+
+---
+
+## 10. Diagrama de Deploy
+
+Topologia completa de implantação do PDW em ambiente local.
+
+```mermaid
+flowchart TD
+    subgraph SCHED["Agendamento Externo"]
+        CRON["cron job\nLinux"]
+        TASK["Task Scheduler\nWindows"]
+    end
+
+    subgraph SCRIPTS["Scripts de Entrada"]
+        SH["RunPDW.sh\ncontrole de lock"]
+        PS["RunPDW.ps1"]
+        BAT["Run_PDW.bat"]
+    end
+
+    subgraph RUNTIME["Runtime Python 3.9+"]
+        VENV["virtualenv / pip\npandas numpy openpyxl xlrd xlsxwriter pyyaml"]
+        FAC["PersonalDataWareHouse.py"]
+        PKG["pdw/ package\n14 módulos"]
+    end
+
+    subgraph CFG_DIR["./ Diretório de Execução"]
+        CFG_F["PersonalDataWareHouse.cfg"]
+        LOCK["PDW_lock/ (mutex dir)"]
+    end
+
+    subgraph DIR_IN_G["DIR_IN/ Entrada"]
+        XLSX_IN["PDW.xlsx"]
+        YAML_IN["PDW_QUERIES.yaml"]
+    end
+
+    subgraph DIR_DB_G["DATABASE_DIR/ Banco"]
+        DB_F[("PDW.db\nSQLite3 >= 3.35")]
+    end
+
+    subgraph DIR_OUT_G["DIR_OUT/ Saídas"]
+        XLSX_OUT["PDW_REPORTS.v2.xlsx"]
+        CSV_OUT["*.csv"]
+        GZ_OUT["*.json.gz / *.xml.gz"]
+    end
+
+    subgraph DIR_LOG_G["LOG_DIR/ Log"]
+        LOG_F["PDW.lnx.log\nPDW.win.log"]
+    end
+
+    CRON --> SH
+    TASK --> PS
+    TASK --> BAT
+    SH --> LOCK
+    SH --> FAC
+    PS --> FAC
+    BAT --> FAC
+    FAC --> PKG
+    VENV --> PKG
+    CFG_F --> PKG
+    XLSX_IN --> PKG
+    YAML_IN --> PKG
+    PKG --> DB_F
+    PKG --> XLSX_OUT
+    PKG --> CSV_OUT
+    PKG --> GZ_OUT
+    PKG --> LOG_F
 ```
