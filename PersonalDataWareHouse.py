@@ -44,20 +44,95 @@
 #                       # remove  "  from descrição field              #
 # 2026-02-10 #  9.11.2  # Cosmetics: number of executions              # Carlin, Luiz A. .'.
 # 2026-05-17 # 10.1.0   # Modularização arquitetural incremental        # Carlin, Luiz A. .'.
-#                       # Este arquivo é uma facade de compatibilidade #
-#                       # O código foi migrado para o pacote pdw/      #
+#                       # Camada de compatibilidade retroativa         #
 #############################################################################################
 # Current Version : 10.1.0
 #############################################################################################
-# Compatibility shim — mantido para compatibilidade com RunPDW.sh / RunPDW.ps1 / Run_PDW.bat
-# O código de negócio reside em pdw/
+# Facade de compatibilidade retroativa — PersonalDataWareHouse.py
+#
+# Este arquivo mantém todos os nomes públicos que existiam no monolito v9.x
+# diretamente importáveis daqui, preservando os contratos:
+#
+#   from PersonalDataWareHouse import main
+#   from PersonalDataWareHouse import new_data_loader
+#   from PersonalDataWareHouse import data_loader        ← alias retroativo
+#   from PersonalDataWareHouse import xlsx_report_generator
+#   ... (todos os 25 nomes públicos + novos alias)
+#
 # Para invocar diretamente o pacote: python -m pdw [config_file]
 ####################################################################################
 """
 
 import sys
 
+# ─── Ponto de entrada ───────────────────────────────────────────────────────
 from pdw.main import main
+
+# ─── ETL ────────────────────────────────────────────────────────────────────
+from pdw.etl.loader import (
+    new_data_loader,
+    read_guiding_sheet,
+    process_accounting_sheet,
+    process_non_accounting_sheet,
+)
+
+# Alias retroativo: data_loader era o nome público antes da v9.10.0
+data_loader = new_data_loader
+
+# ─── Transformação / sanitização ────────────────────────────────────────────
+from pdw.etl.sanitizer import (
+    data_correjeitor,
+    sanitize_entries_dataframe,
+    add_temporal_columns,
+    enrich_dataframe_with_dates,
+    sanitize_financial_columns,
+    clean_description_text,
+)
+
+# ─── Infraestrutura de banco ────────────────────────────────────────────────
+from pdw.database.operations import (
+    table_droppator,
+    save_dataframe_to_database,
+    sort_dataframe_by_date,
+)
+
+# ─── Analytics ──────────────────────────────────────────────────────────────
+from pdw.analytics.pivot import create_pivot_history, create_dinamic_reports
+from pdw.analytics.totals import totalizador_diario, monthly_summaries, split_paymnt_resume
+
+# ─── Relatórios ─────────────────────────────────────────────────────────────
+from pdw.reports.exporter import general_entries_file_exportator
+from pdw.reports.xlsx_generator import xlsx_report_generator
+from pdw.reports.novos_relatorios import gerar_todos_relatorios_integrado
+
+# ─── Utilitários ────────────────────────────────────────────────────────────
+from pdw.utils.compression import gzip_compressor
+from pdw.utils.xml_utils import dataframe_to_xml
+from pdw.utils.transient_data import transient_data_exportator
+from pdw.utils.localization import get_month_names, get_weekday_names
+
+
+__all__ = [
+    # Ponto de entrada
+    "main",
+    # ETL
+    "new_data_loader", "data_loader",
+    "read_guiding_sheet", "process_accounting_sheet", "process_non_accounting_sheet",
+    # Transform
+    "data_correjeitor", "sanitize_entries_dataframe", "add_temporal_columns",
+    "enrich_dataframe_with_dates", "sanitize_financial_columns", "clean_description_text",
+    # Database
+    "table_droppator", "save_dataframe_to_database", "sort_dataframe_by_date",
+    # Analytics
+    "create_pivot_history", "create_dinamic_reports",
+    "totalizador_diario", "monthly_summaries", "split_paymnt_resume",
+    # Reports
+    "general_entries_file_exportator", "xlsx_report_generator", "gerar_todos_relatorios_integrado",
+    # Utils
+    "gzip_compressor", "dataframe_to_xml", "transient_data_exportator",
+    "get_month_names", "get_weekday_names",
+]
+
 
 if __name__ == '__main__':
     input_param_file = ""
