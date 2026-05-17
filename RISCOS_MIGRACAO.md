@@ -219,3 +219,93 @@ A migração será considerada bem-sucedida quando:
 3. **Compatibilidade**: O `RunPDW.sh` executar o novo código sem alterações (via shim ou ajuste de path).
 4. **Estrutura**: Cada módulo contém apenas as funções listadas no inventário para aquele módulo.
 5. **Sem novos imports**: Nenhum novo framework ou biblioteca foi introduzido.
+
+---
+
+## Riscos Adicionais para Reescrita Multi-Linguagem (Fase 4)
+
+Os riscos abaixo se aplicam especificamente ao processo de reescrita completa em outra linguagem.
+
+---
+
+### RISCO-11 · Inferência de tipo do Excel: pandas vs leitura manual — CRÍTICO
+
+**Descrição**: `pandas.read_excel()` infere automaticamente tipos de células (número, data, string, booleano). Em Java (Apache POI), Rust (calamine), Go (excelize), a leitura é por célula com tipo explícito. Células que o pandas inferiu como datas podem vir como números seriais Excel (ex: `45297` em vez de `2025-01-15`) se não tratadas corretamente.
+
+**Impacto**: Dados de Data incorretos → pivot tables e sumarizações erradas.
+
+**Mitigação**: Verificar `DateUtil.isCellDateFormatted(cell)` (Java) ou equivalente antes de parsear qualquer célula numérica como data.
+
+---
+
+### RISCO-12 · Células vazias vs nulas: comportamento diferente por linguagem — ALTO
+
+**Descrição**: O Python/pandas trata células vazias como `NaN` (float). Em Java, POI retorna `CellType.BLANK`. Em Go/excelize, células ausentes retornam string vazia `""`. O PDW usa `pd.isna()` para detectar nulos — o equivalente é diferente em cada linguagem.
+
+**Mitigação**: Criar função helper de "is_null_or_empty" na linguagem alvo que mapeia exatamente ao comportamento do pandas (`pd.isna()` retorna True para `None`, `NaN`, `pd.NaT`).
+
+---
+
+### RISCO-13 · Encoding de strings: UTF-8 vs outros — MÉDIO
+
+**Descrição**: O PDW processa strings como `∴` (ponto triplo), `ś` (s com cedilha), caracteres acentuados PT-BR. O Python 3 usa UTF-8 internamente. Planilhas Excel antigas podem usar Windows-1252 em campos de texto.
+
+**Impacto**: Caracteres especiais podem corromper ao ler com encoding incorreto.
+
+**Mitigação**: Forçar UTF-8 em todas as operações de leitura/escrita. Apache POI lida com isso automaticamente para XLSX.
+
+---
+
+### RISCO-14 · Formato de data no banco: ISO vs local — ALTO
+
+**Descrição**: O PDW armazena datas no SQLite como string no formato que o pandas gera ao chamar `to_sql()`. O formato padrão do pandas é `YYYY-MM-DD` para datas e `YYYY-MM-DD HH:MM:SS.ffffff` para timestamps. Queries SQL que usam `strftime('%Y', Data)` dependem desse formato exato.
+
+**Mitigação**: Ao inserir no SQLite, sempre converter datas para string ISO `YYYY-MM-DD`. Verificar com `SELECT * FROM LANCAMENTOS_GERAIS LIMIT 1` que o formato está correto antes de rodar queries de pivot.
+
+---
+
+### RISCO-15 · Separador CSV: `;` vs `,` — BAIXO
+
+**Descrição**: O PDW exporta CSV com separador `;` (ponto e vírgula), não `,`. Scripts externos que consomem o CSV podem quebrar se a reescrita usar `,` como padrão.
+
+**Mitigação**: Hardcode do separador `;` na exportação CSV. Documentar no formato de saída.
+
+---
+
+### RISCO-16 · Ordem das linhas no banco: ordenação descendente por Data — MÉDIO
+
+**Descrição**: `save_dataframe_to_database()` ordena o DataFrame por Data descendente antes de inserir. Reescritas que não preservarem esta ordenação produzirão bancos com linhas em ordem diferente. Queries analíticas que dependem de `ROWID` ou ordem de inserção podem retornar resultados em ordem diferente.
+
+**Mitigação**: Aplicar `ORDER BY Data DESC` antes de qualquer bulk insert no SQLite. Alternativamente, sempre usar `ORDER BY` explícito nas queries analíticas.
+
+---
+
+### RISCO-17 · Tabelas hardcoded em `data_correjeitor`: schema implícito — CRÍTICO
+
+**Descrição**: A função `data_correjeitor` assume que as tabelas `Parcelamentos`, `GUIDING` e a view `Origens` existem com estrutura específica. Em qualquer reescrita, estas dependências implícitas devem ser tornadas explícitas e verificadas na inicialização.
+
+**Estrutura implícita assumida**:
+```sql
+-- GUIDING deve ter:
+TABLE_NAME TEXT, ACCOUNTING TEXT, LOADABLE TEXT
+
+-- Parcelamentos deve ter:
+DATA TEXT (ou date), "Tipo Lançamento" TEXT
+
+-- View Origens (criada pela própria função):
+SELECT TABLE_NAME as nome FROM GUIDING WHERE LOADABLE = 'X'
+```
+
+---
+
+### Tabela de Riscos Multi-Linguagem
+
+| ID | Descrição | Linguagem mais afetada | Severidade |
+|---|---|---|---|
+| RISCO-11 | Inferência de tipo Excel | Java, Go, C++ | CRÍTICO |
+| RISCO-12 | Células vazias vs nulas | Java, Go, Rust | ALTO |
+| RISCO-13 | Encoding UTF-8 | Todas | MÉDIO |
+| RISCO-14 | Formato de data no banco | Todas | ALTO |
+| RISCO-15 | Separador CSV `;` | Todas | BAIXO |
+| RISCO-16 | Ordenação descendente | Todas | MÉDIO |
+| RISCO-17 | Schema implícito em data_correjeitor | Todas | CRÍTICO |

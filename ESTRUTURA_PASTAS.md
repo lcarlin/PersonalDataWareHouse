@@ -161,3 +161,121 @@ Apenas a versão deverá ser atualizada quando a migração estiver completa:
 [SETTINGS]
 CURRENT_VERSION = 10.1.0   ← atualizar apenas após migração completa e validada
 ```
+
+---
+
+## Estrutura Equivalente em Outras Linguagens
+
+### Java (Maven)
+
+```
+pdw-java/
+├── pom.xml
+└── src/main/
+    ├── java/com/pdw/
+    │   ├── PdwApplication.java          ← = PersonalDataWareHouse.py (entry point)
+    │   ├── config/PdwProperties.java    ← = pdw/config/loader.py
+    │   ├── core/BatchConfig.java        ← = pdw/core/orchestrator.py
+    │   ├── domain/Lancamento.java       ← entidade principal (sem equivalente Python)
+    │   ├── etl/ExcelReader.java         ← = pdw/etl/loader.py
+    │   ├── etl/LancamentoProcessor.java ← = pdw/etl/sanitizer.py
+    │   ├── database/JdbcWriter.java     ← = pdw/database/operations.py
+    │   ├── analytics/PivotBuilder.java  ← = pdw/analytics/pivot.py
+    │   ├── analytics/TotalsCalc.java    ← = pdw/analytics/totals.py
+    │   ├── reports/ExcelWriter.java     ← = pdw/reports/xlsx_generator.py
+    │   ├── reports/Exporter.java        ← = pdw/reports/exporter.py
+    │   └── infrastructure/PdwLogger.java← = pdw/infrastructure/logging.py
+    └── resources/
+        ├── application.properties       ← = PersonalDataWareHouse.cfg
+        └── queries/pdw-queries.yml      ← = PDW_QUERIES.yaml
+```
+
+### Rust (Cargo)
+
+```
+pdw-rust/
+├── Cargo.toml
+└── src/
+    ├── main.rs                  ← = PersonalDataWareHouse.py + pdw/main.py
+    ├── config.rs                ← = pdw/config/loader.py
+    ├── etl/
+    │   ├── mod.rs
+    │   ├── loader.rs            ← = pdw/etl/loader.py
+    │   └── sanitizer.rs         ← = pdw/etl/sanitizer.py
+    ├── database.rs              ← = pdw/database/operations.py
+    ├── analytics/
+    │   ├── mod.rs
+    │   ├── pivot.rs             ← = pdw/analytics/pivot.py
+    │   └── totals.rs            ← = pdw/analytics/totals.py
+    ├── reports/
+    │   ├── mod.rs
+    │   ├── exporter.rs          ← = pdw/reports/exporter.py
+    │   └── xlsx_generator.rs    ← = pdw/reports/xlsx_generator.py
+    └── utils/
+        ├── compression.rs       ← = pdw/utils/compression.py
+        ├── xml_utils.rs         ← = pdw/utils/xml_utils.py
+        └── localization.rs      ← = pdw/utils/localization.py
+```
+
+### Go
+
+```
+pdw-go/
+├── go.mod
+├── main.go                      ← = PersonalDataWareHouse.py + pdw/main.py
+└── internal/
+    ├── config/loader.go         ← = pdw/config/loader.py
+    ├── infrastructure/log.go    ← = pdw/infrastructure/logging.py
+    ├── etl/
+    │   ├── loader.go            ← = pdw/etl/loader.py
+    │   └── sanitizer.go         ← = pdw/etl/sanitizer.py
+    ├── database/operations.go   ← = pdw/database/operations.py
+    ├── analytics/
+    │   ├── pivot.go             ← = pdw/analytics/pivot.py
+    │   └── totals.go            ← = pdw/analytics/totals.py
+    ├── reports/
+    │   ├── exporter.go          ← = pdw/reports/exporter.py
+    │   └── xlsx_generator.go    ← = pdw/reports/xlsx_generator.py
+    └── utils/
+        ├── compression.go       ← = pdw/utils/compression.py
+        ├── xml.go               ← = pdw/utils/xml_utils.py
+        └── localization.go      ← = pdw/utils/localization.py
+```
+
+### Node.js / TypeScript
+
+```
+pdw-node/
+├── package.json
+├── tsconfig.json
+└── src/
+    ├── index.ts                 ← = PersonalDataWareHouse.py + pdw/main.py
+    ├── config/loader.ts         ← = pdw/config/loader.py
+    ├── infrastructure/logger.ts ← = pdw/infrastructure/logging.py
+    ├── etl/
+    │   ├── loader.ts            ← = pdw/etl/loader.py
+    │   └── sanitizer.ts         ← = pdw/etl/sanitizer.py
+    ├── database/operations.ts   ← = pdw/database/operations.py
+    ├── analytics/
+    │   ├── pivot.ts             ← = pdw/analytics/pivot.py
+    │   └── totals.ts            ← = pdw/analytics/totals.py
+    ├── reports/
+    │   ├── exporter.ts          ← = pdw/reports/exporter.py
+    │   └── xlsxGenerator.ts     ← = pdw/reports/xlsx_generator.py
+    └── utils/
+        ├── compression.ts       ← = pdw/utils/compression.py
+        ├── xmlUtils.ts          ← = pdw/utils/xml_utils.py
+        └── localization.ts      ← = pdw/utils/localization.py
+```
+
+---
+
+## Regras de Nomenclatura por Linguagem
+
+| Elemento | Python (atual) | Java | Rust | Go | Node.js/TS |
+|---|---|---|---|---|---|
+| Arquivo | `snake_case.py` | `PascalCase.java` | `snake_case.rs` | `snake_case.go` | `camelCase.ts` |
+| Função | `snake_case()` | `camelCase()` | `snake_case()` | `camelCase()` | `camelCase()` |
+| Constante | `UPPER_CASE` | `UPPER_CASE` | `UPPER_CASE` | `UPPER_CASE` | `UPPER_CASE` |
+| Parâmetro | `snake_case` | `camelCase` | `snake_case` | `camelCase` | `camelCase` |
+| Classe/struct | — | `PascalCase` | `PascalCase` | `PascalCase` | `PascalCase` |

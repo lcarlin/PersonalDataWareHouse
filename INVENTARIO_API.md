@@ -9,11 +9,30 @@
 | Métrica | Valor |
 |---|---|
 | Arquivo analisado | `PersonalDataWareHouse.py` |
-| Tamanho | ~989 linhas |
-| Total de funções | 25 |
+| Tamanho | ~989 linhas (v9.11.2) → 14 módulos em `pdw/` (v10.1.0) |
+| Total de funções públicas | 25 (+ 1 alias: `data_loader`) |
 | Imports de stdlib | `sqlite3`, `datetime`, `os`, `platform`, `sys`, `threading`, `time`, `xml.etree.ElementTree`, `gzip`, `shutil` |
 | Imports de terceiros | `pandas`, `numpy`, `configparser`, `yaml` |
 | Dependências externas | arquivo `.cfg`, arquivo `.yaml`, arquivo `.xlsx`, banco `.db` |
+
+### Mapeamento de Funções para Linguagens Alvo
+
+| Função Python | Tipo de Componente | Java | Rust | Go |
+|---|---|---|---|---|
+| `run_pipeline` | Orquestrador | `Job` (Spring Batch) | `fn main` + pipeline fn | `func RunPipeline` |
+| `load_config` | Config reader | `@ConfigurationProperties` | `Config::from_file()` | `func LoadConfig` |
+| `open_log` / `finalize_log` | Logger | `PdwLogger` bean | `struct Logger` | `type Logger struct` |
+| `new_data_loader` | ETL step | `Step` com Reader+Processor+Writer | `fn load_data` | `func LoadData` |
+| `sanitize_entries_dataframe` | Transformador | `ItemProcessor<ExcelRow, Lancamento>` | `fn sanitize` | `func Sanitize` |
+| `data_correjeitor` | Pós-processador SQL | SQL em `@PostStep` listener | `fn post_process` | `func PostProcess` |
+| `table_droppator` | DB util | `JdbcTemplate.execute(DROP)` | `conn.execute("DROP TABLE...")` | `db.Exec("DROP TABLE...")` |
+| `save_dataframe_to_database` | DB writer | `JdbcBatchItemWriter` | `rusqlite::Connection::execute_batch` | `db.Exec` em loop |
+| `create_pivot_history` | Analytics | SQL em Step dedicado | `fn build_pivot` | `func BuildPivot` |
+| `xlsx_report_generator` | Report writer | `ExcelReportWriter` + POI | `XlsxWriter` | `excelize.File` |
+| `general_entries_file_exportator` | Multi-format exporter | Step com 3 writers | `fn export_all` | `func ExportAll` |
+| `gzip_compressor` | Util | `GZIPOutputStream` | `flate2::GzEncoder` | `compress/gzip` |
+| `dataframe_to_xml` | Util | `JAXB` / `javax.xml` | `quick-xml` | `encoding/xml` |
+| `get_month_names` | Localization | `Map<Month, String>` estático | `HashMap` const | `map[int]string` const |
 
 ---
 

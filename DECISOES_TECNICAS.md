@@ -228,3 +228,133 @@ preservado em `core/orchestrator.py` para manter fidelidade ao código original.
 | DT-09 | Preservar todo código morto e comentários | Histórico mantido |
 | DT-10 | Validação binária por passo | Regressão detectada antes de avançar |
 | DT-11 | Nenhum import novo | Sem novas dependências |
+
+---
+
+## Decisões Técnicas para Reescrita Multi-Linguagem (Fase 4)
+
+As decisões abaixo se aplicam a quem for reescrever o sistema em Java, Rust, Go, C++ ou Node.js.
+
+---
+
+## DT-12 · Entidade de domínio central: `Lancamento`
+
+**Decisão**: Criar uma entidade/struct/record tipada representando um lançamento financeiro.
+
+**Campos obrigatórios**:
+```
+data:       date/LocalDate    ← coluna "Data" do Excel
+tipo:       string            ← coluna "TIPO"
+descricao:  string            ← coluna "DESCRICAO" (pós-sanitização)
+credito:    float64           ← coluna "Credito" (0.0 quando nulo)
+debito:     float64           ← coluna "Debito" (0.0 quando nulo)
+origem:     string            ← nome da aba Excel de origem
+mes:        string            ← nome PT-BR do mês (derivado de data)
+diaSemana:  string            ← nome PT-BR do dia da semana (derivado de data)
+```
+
+**Justificativa**: Python usa DataFrames sem schema explícito. Em linguagens tipadas, uma entidade garante contratos em tempo de compilação e elimina a ambiguidade de tipos por coluna.
+
+---
+
+## DT-13 · Nomes de tabela: allowlist obrigatória
+
+**Decisão**: Toda referência a nome de tabela via variável de configuração deve passar por uma allowlist de valores válidos antes de ser usada em SQL.
+
+**Justificativa**: O Python atual concatena nomes de tabela diretamente em SQL (SQL injection — SEC-01). Em reescritas, usar allowlist explícita.
+
+```java
+private static final Set<String> ALLOWED_TABLES = Set.of(
+    "LANCAMENTOS_GERAIS", "TiposLancamentos", "PARCELAMENTOS",
+    "GUIDING", "HistoricoGeral", "HistoricoAnual"
+);
+```
+
+---
+
+## DT-14 · Ordem de execução do pipeline: invariante arquitetural
+
+**Decisão**: A ordem das fases do pipeline é uma invariante que deve ser respeitada em qualquer reescrita. Não paralelizar entre fases.
+
+**Ordem obrigatória**:
+1. Config + Log (abertura)
+2. ETL: Excel → SQLite (se `run_loader=true`)
+3. Pivot tables (se `create_pivot=true`)
+4. Relatórios dinâmicos (se `run_dinamic_report=true`)
+5. Sumarizações mensais + parcelamentos
+6. Exportação multi-formato
+7. Geração Excel (YAML queries)
+8. Log (fechamento)
+
+**Justificativa**: Cada fase depende dos dados criados pela fase anterior no banco SQLite.
+
+---
+
+## DT-15 · Formato do log: contrato de interface externa
+
+**Decisão**: O formato da linha de log (`YYYY/MM/DD HH:MM:SS | Version: X | Host: Y | OS: Z | Runs: N | Time: Ts | Last: D`) é um contrato externo e não deve ser alterado sem versionar o formato.
+
+**Justificativa**: Scripts de monitoramento externos podem parsear este formato. Mudar o delimitador ou a ordem dos campos quebraria esses parsers silenciosamente.
+
+---
+
+## DT-16 · Threading: manter desabilitado
+
+**Decisão**: Em qualquer reescrita, não implementar processamento paralelo entre abas do Excel sem análise cuidadosa do modelo de escrita no SQLite.
+
+**Justificativa**: SQLite suporta apenas um escritor simultâneo. Leitura paralela de abas Excel é segura, mas a escrita no banco deve ser serializada ou usar bulk insert único após coleta paralela.
+
+---
+
+## DT-17 · Configuração: validação de versão obrigatória
+
+**Decisão**: O sistema deve validar na inicialização que a versão em `application.properties` (ou equivalente) corresponde à versão compilada do artefato. Em caso de mismatch: `System.exit(1)` (ou equivalente).
+
+**Justificativa**: A versão no .cfg é o mecanismo de proteção contra executar código novo com config antiga ou vice-versa. Esta validação foi a principal causa de falha de deploy na v9.x e deve ser preservada.
+
+---
+
+## DT-18 · Localização PT-BR: dicionários estáticos
+
+**Decisão**: Meses e dias da semana em PT-BR devem ser mapeados a partir de dicionários/maps estáticos. Não usar `locale` do sistema operacional (não portável).
+
+**Justificativa**: A localização do sistema pode não ter `pt_BR.UTF-8`. O PDW usa dicionários hardcoded para garantir consistência independente do ambiente.
+
+```java
+// Correto — dicionário estático
+static final Map<Month, String> MES_PT_BR = Map.of(
+    Month.JANUARY, "Janeiro", Month.FEBRUARY, "Fevereiro", /* ... */
+);
+
+// Errado — depende do locale do sistema
+String mes = date.getMonth().getDisplayName(TextStyle.FULL, new Locale("pt", "BR"));
+```
+
+---
+
+## DT-19 · Sanitização de DESCRICAO: transformações exatas
+
+**Decisão**: As 5 substituições de `clean_description_text` são regras de negócio e devem ser replicadas exatamente, na mesma ordem.
+
+**Transformações (em ordem)**:
+1. `[;,]` → `|` (regex)
+2. `∴` → ` .'. `
+3. `ś` → `s`
+4. `"` → `""` (remove aspas duplas)
+5. `strip()` (remove espaços no início/fim)
+
+**Justificativa**: Os dados históricos no banco foram processados com estas substituições. Mudá-las geraria dados inconsistentes com o histórico existente.
+
+---
+
+## DT-20 · Arquivos de saída: nomes com timestamp
+
+**Decisão**: Arquivos exportados (CSV, JSON.gz, XML.gz) devem incluir timestamp no nome para evitar sobrescrita. O arquivo Excel de relatório é sobrescrito (sem timestamp).
+
+**Padrão**:
+```
+{OUT_RPT_FILE}.YYYYMMDD.HHMMSS.csv
+{OUT_RPT_FILE}.YYYYMMDD.HHMMSS.json.gz
+{OUT_RPT_FILE}.YYYYMMDD.HHMMSS.xml.gz
+{OUT_RPT_FILE}.xlsx                      ← sem timestamp, sobrescreve
+```
