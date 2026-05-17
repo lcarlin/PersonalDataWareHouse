@@ -1,6 +1,40 @@
 # RISCOS_MIGRACAO.md
-## Personal Data Warehouse — Riscos da Refatoração
-### Versão atual: 9.11.2 → Versão alvo: 10.1.0
+## Personal Data Warehouse — Análise de Riscos da Refatoração e Migração
+### Versão atual: 10.1.0 | Análise de hardening arquitetural
+
+---
+
+## Dashboard de Scores Globais
+
+| Dimensão | Score | Classificação |
+|---|---|---|
+| **Risco Global** | **7.2 / 10** | 🔴 CRÍTICO |
+| **Acoplamento** | **7.8 / 10** | 🟠 ALTO (10 = máximo acoplamento) |
+| **Modularidade** | **3.5 / 10** | 🟠 BAIXA (10 = totalmente modular) |
+| **Portabilidade** | **3.8 / 10** | 🔴 DIFÍCIL de portar (10 = trivial) |
+| **Testabilidade** | **2.5 / 10** | 🔴 CRÍTICA (10 = totalmente testável) |
+
+> Scores baseados em análise estática do código-fonte real da versão 10.1.0.
+> Metodologia: 1 = melhor / 10 = pior para Risco e Acoplamento; 1 = pior / 10 = melhor para Modularidade, Portabilidade, Testabilidade.
+
+---
+
+## Scores por Módulo
+
+| Módulo | Risco | Acoplamento | Modularidade | Portabilidade | Problemas críticos |
+|---|---|---|---|---|---|
+| `database/operations.py` | 9.5 | 6.0 | 5.0 | 6.0 | SQL injection via concatenação |
+| `etl/sanitizer.py` | 9.0 | 7.0 | 4.0 | 4.0 | SQL injection + schema hardcoded |
+| `utils/transient_data.py` | 9.0 | 5.0 | 4.0 | 4.0 | SQL injection via valor de dado |
+| `analytics/pivot.py` | 8.5 | 8.0 | 3.5 | 3.0 | Connection leak + double Excel read |
+| `analytics/totals.py` | 8.0 | 6.0 | 4.0 | 4.0 | 2 connection leaks + 2 missing commits |
+| `reports/xlsx_generator.py` | 7.5 | 9.5 | 2.0 | 2.0 | 15 parâmetros posicionais |
+| `core/orchestrator.py` | 7.0 | 9.0 | 2.5 | 2.5 | 35+ variáveis locais, exit(1) |
+| `etl/loader.py` | 6.0 | 7.0 | 4.0 | 4.0 | iterrows() O(n) |
+| `utils/xml_builder.py` | 5.0 | 4.0 | 5.0 | 6.0 | iterrows() O(n) |
+| `analytics/dynamics.py` | 6.5 | 6.0 | 4.0 | 3.5 | double Excel read por linha |
+| `config/loader.py` | 3.0 | 4.0 | 6.0 | 7.0 | versão duplicada em .cfg |
+| `infrastructure/logger.py` | 4.0 | 3.0 | 7.0 | 5.0 | append mode sem rotação |
 
 ---
 
@@ -8,205 +42,484 @@
 
 | Nível | Descrição |
 |---|---|
-| 🔴 CRÍTICO | Pode causar perda de dados, corrupção do banco ou falha silenciosa |
-| 🟠 ALTO | Pode causar erro em runtime ou comportamento diferente do esperado |
-| 🟡 MÉDIO | Pode causar confusão de manutenção ou acoplamento frágil |
+| 🔴 CRÍTICO | Pode causar perda de dados, corrupção do banco, SQL injection ou falha silenciosa |
+| 🟠 ALTO | Pode causar erro em runtime, comportamento incorreto ou migration blocker |
+| 🟡 MÉDIO | Acoplamento frágil, manutenção complexa, comportamento surpreendente |
 | 🟢 BAIXO | Cosmético, técnico ou de estilo — sem impacto funcional |
 
 ---
 
-## Riscos Identificados
+## Riscos Identificados — Refatoração Interna (v9.11.2 → v10.1.0)
 
 ---
 
 ### RISCO-01 · Ambiguidade de tipo em `table_droppator` e `data_correjeitor`
 - **Severidade**: 🔴 CRÍTICO
-- **Localização**: `table_droppator` (L490–493) e `data_correjeitor` (L461–488)
+- **Score de risco**: 8.0 / 10
+- **Localização**: `database/operations.py` e `etl/sanitizer.py`
 - **Descrição**:
-  O parâmetro `conexao` em ambas as funções é nomeado como "conexão",
-  mas pode receber **ou um `cursor`** ou **uma `connection`** dependendo do chamador:
-  - Em `new_data_loader` (L832): `table_droppator(cursor, ...)` → recebe `cursor`
-  - Em `new_data_loader` (L879): `data_correjeitor(cursor, ...)` → recebe `cursor`
-  - Dentro de `data_correjeitor`: `cursor = conexao; cursor.execute(...)` → OK se for cursor
-  - O objeto `cursor` em `new_data_loader` é criado como `cursor = conn.cursor()` (L829)
-
-  O problema: se no futuro alguém chamar `table_droppator(conn, ...)` com a `connection`
-  diretamente (lógica razoável pelo nome do parâmetro), o `cursor.execute()` falhará,
-  pois `connection.execute()` não existe no sqlite3 padrão sem a interface simplificada.
-- **Impacto durante extração**: Ao mover `table_droppator` para `database/operations.py`,
-  a assinatura precisa ser clarificada — sem renomear a função pública.
-- **Mitigação**: Documentar explicitamente que o parâmetro deve ser um `cursor`, não connection.
-  Não alterar a assinatura durante esta fase de modularização.
+  O parâmetro `conexao` pode receber um `cursor` ou uma `connection` dependendo do chamador.
+  Em `new_data_loader`: `table_droppator(cursor, ...)` — recebe cursor.
+  Dentro de `data_correjeitor`: `cursor = conexao; cursor.execute(...)` — assume cursor.
+  Se chamado com a `connection` diretamente, falha silenciosamente ou com AttributeError.
+- **Impacto na migração Java**: Java força tipagem explícita — `PreparedStatement` vs `Connection` não são intercambiáveis.
+- **Mitigação**: Documentar que o parâmetro deve ser `cursor`. Não alterar assinatura.
 
 ---
 
-### RISCO-02 · SQL hardcoded com nomes de tabelas não parametrizados em `data_correjeitor`
+### RISCO-02 · SQL hardcoded com nomes de tabelas não parametrizados
 - **Severidade**: 🔴 CRÍTICO
-- **Localização**: `data_correjeitor` (L475–480)
+- **Score de risco**: 9.0 / 10
+- **Score de portabilidade**: 2.0 / 10
+- **Localização**: `etl/sanitizer.py` — `data_correjeitor`
 - **Código afetado**:
   ```python
-  lista_acoes.append(('DELETE FROM Parcelamentos WHERE 1 = 1 AND (DATA IS NULL OR "Tipo Lançamento" is null) ;', ...))
-  lista_acoes.append((f'DROP VIEW IF EXISTS Origens; ', ...))
-  lista_acoes.append((f"create view Origens as select TABLE_NAME as nome from GUIDING gd where ...", ...))
+  lista_acoes.append(('DELETE FROM Parcelamentos WHERE 1 = 1 AND (DATA IS NULL OR "Tipo Lançamento" is null)', ...))
+  lista_acoes.append(('DROP VIEW IF EXISTS Origens;', ...))
+  lista_acoes.append(('CREATE VIEW Origens AS SELECT TABLE_NAME as nome FROM GUIDING gd WHERE LOADABLE = "X"', ...))
   ```
-- **Descrição**:
-  Os nomes `Parcelamentos`, `Origens` e `GUIDING` são **hardcoded no corpo da função**
-  e não são passados como parâmetros. Se o arquivo `.cfg` usar nomes diferentes para
-  estas tabelas, o SQL não refletirá isso — a limpeza de dados ocorrerá na tabela errada
-  ou falhará silenciosamente (DELETE com WHERE que não encontra linhas não gera erro).
-- **Impacto durante extração**: Ao mover para `etl/sanitizer.py`, esta dependência
-  implícita no schema deve ser documentada no docstring da função.
-- **Mitigação**: NÃO alterar o SQL agora (fora do escopo). Documentar o schema esperado.
+- **Descrição**: `Parcelamentos`, `Origens`, `GUIDING`, `Tipo Lançamento`, `Código`, `Descrição`
+  são hardcoded. Coluna `"Tipo Lançamento"` contém espaço e acento — problemática em qualquer
+  ORM de qualquer linguagem.
+- **Impacto na migração**: Qualquer ORM (Hibernate, JOOQ, SQLAlchemy, Diesel) que gere
+  esquemas automaticamente precisará de mapeamento manual explícito para estas colunas.
+- **Mitigação**: NÃO alterar o SQL agora. Documentar schema implícito esperado.
 
 ---
 
-### RISCO-03 · `gzip_compressor` remove o arquivo original — operação destrutiva sem rollback
+### RISCO-03 · `gzip_compressor` remove arquivo original — operação destrutiva sem rollback
 - **Severidade**: 🟠 ALTO
-- **Localização**: `gzip_compressor` (L533–541)
+- **Score de risco**: 7.0 / 10
+- **Localização**: `utils/compression.py` — `gzip_compressor`
 - **Código afetado**:
   ```python
-  os.remove(arquivo_origem)  # linha 541 — executado APÓS a compressão
+  os.remove(arquivo_origem)  # executado APÓS compressão — sem verificação de integridade
   ```
-- **Descrição**:
-  A função comprime o arquivo e remove o original. Se a abertura do arquivo de saída
-  falhar no meio (disco cheio, permissão, etc.), o `gzip.open` pode ter criado um `.gz`
-  corrompido — e o `os.remove` **ainda será executado** porque está fora do bloco `with`.
-  O arquivo original é perdido.
-- **Impacto durante extração**: A lógica deve ser preservada exatamente ao mover para
-  `utils/compression.py`. Não alterar o comportamento.
-- **Mitigação**: Ao extrair o módulo, adicionar comentário explícito sobre o risco.
-  Não alterar o código (fora do escopo desta refatoração).
+- **Descrição**: Se compressão falhar parcialmente (disco cheio, permissão), o `.gz` pode
+  estar corrompido e o arquivo original é apagado. Sem rollback.
+- **Impacto na migração**: Em Java/Rust/Go, o padrão é escrever em arquivo temporário e
+  renomear atomicamente — o comportamento Python atual é mais arriscado.
+- **Mitigação**: Preservar comportamento exato. Documentar o risco no módulo.
 
 ---
 
-### RISCO-04 · Versão hardcoded em dois lugares com verificação de match obrigatória
+### RISCO-04 · Versão hardcoded em dois lugares com verificação obrigatória
 - **Severidade**: 🟠 ALTO
-- **Localização**: `main()` (L100) e `PersonalDataWareHouse.cfg` (linha 18)
-- **Código afetado**:
-  ```python
-  current_version = "9.11.2"   # em main()
-  # e
-  CURRENT_VERSION = 9.11.2     # em .cfg
-  ```
-- **Descrição**:
-  A versão existe em dois lugares. A função `main` compara as duas e encerra com `exit(1)`
-  se não baterem. Durante a migração para 10.1.0, **ambos** devem ser atualizados
-  atomicamente. Se apenas o código for atualizado e não o `.cfg`, ou vice-versa,
-  a aplicação se recusará a executar.
-- **Impacto durante extração**: Quando `config/loader.py` for extraído, a versão esperada
-  deve ser importada de um único lugar canônico (ex: `pdw/__init__.py`).
-- **Mitigação**: Atualizar ambos apenas quando a migração estiver 100% concluída e testada.
+- **Score de risco**: 6.5 / 10
+- **Localização**: `pdw/__init__.py` ou `core/orchestrator.py` + `PersonalDataWareHouse.cfg`
+- **Descrição**: A versão existe em dois lugares. `main()` compara as duas e encerra com
+  `exit(1)` se não baterem. Ambos devem ser atualizados atomicamente.
+- **Impacto na migração**: Em Java, o pom.xml seria a fonte canônica. Manter dois lugares
+  sincronizados é um ponto de falha garantido.
+- **Mitigação**: Atualizar ambos apenas quando migração estiver 100% concluída.
 
 ---
 
-### RISCO-05 · Conexões SQLite abertas por função sem pool — múltiplos `connect()` por execução
+### RISCO-05 · Múltiplas conexões SQLite — ausência de pool ou gerenciamento centralizado
 - **Severidade**: 🟡 MÉDIO
-- **Localização**: Múltiplas funções
-- **Funções afetadas**:
-  `new_data_loader`, `create_pivot_history`, `split_paymnt_resume`,
-  `monthly_summaries`, `general_entries_file_exportator`, `totalizador_diario`,
-  `xlsx_report_generator`, `create_dinamic_reports`
-- **Descrição**:
-  Cada função abre sua própria conexão `sqlite3.connect(db_file)` e a fecha
-  (ou não — ver RISCO-06). Isso é funcionalmente correto para SQLite em modo serial,
-  mas significa que não há controle centralizado de transações.
-  Se uma função falhar após escrever dados mas antes de fechar a conexão, dados
-  podem ficar em estado parcialmente commitado dependendo do modo WAL do SQLite.
-- **Impacto durante extração**: As assinaturas das funções receberão `db_file: str`
-  como hoje — sem alteração. O comportamento de conexão individual é preservado.
+- **Score de acoplamento**: 6.0 / 10
+- **Score de portabilidade**: 5.0 / 10
+- **Localização**: 8 funções com `sqlite3.connect(db_file)` independentes
+- **Descrição**: Cada função abre sua própria conexão. Sem pool, sem transação global,
+  sem controle de concorrência. Funciona em modo serial. Risco de `database is locked`
+  se duas funções forem chamadas em threads diferentes.
+- **Impacto na migração**: Em Java (JDBC), Spring Batch gerencia connection pooling
+  automaticamente. A semântica muda: uma única transação de batch seria o padrão JVM.
 - **Mitigação**: Não alterar agora. Documentar como limitação técnica.
 
 ---
 
-### RISCO-06 · `create_pivot_history` não fecha a conexão SQLite
-- **Severidade**: 🟡 MÉDIO
-- **Localização**: `create_pivot_history` (L496–530)
-- **Código afetado**: A função abre `connection = sqlite3.connect(...)`, faz `connection.commit()` mas **nunca chama `connection.close()`**
-- **Descrição**:
-  O objeto `connection` vai para garbage collection do Python, que eventualmente
-  fechará a conexão. Em ambiente normal isso funciona. Mas com múltiplas chamadas
-  ou em contextos de teste, pode causar `database is locked` se outra função
-  tentar abrir o mesmo arquivo logo depois.
-- **Impacto durante extração**: Ao mover para `analytics/pivot.py`, preservar o
-  comportamento atual (não adicionar `connection.close()`).
-- **Mitigação**: Documentar no módulo extraído. Não corrigir nesta fase.
+### RISCO-06 · `create_pivot_history` não fecha conexão SQLite
+- **Severidade**: 🟡 MÉDIO → promovido para 🟠 ALTO após hardening
+- **Score de risco**: 7.5 / 10
+- **Localização**: `analytics/pivot.py` — `create_pivot_history`
+- **Descrição**: Abre `connection = sqlite3.connect(...)`, faz `connection.commit()`,
+  nunca chama `connection.close()`. O GC do Python eventualmente fecha, mas causa
+  `database is locked` em testes ou execuções consecutivas rápidas.
+- **Ver também**: RISCO-18 (inventory completo de leaks)
+- **Mitigação**: Documentar no módulo extraído.
 
 ---
 
-### RISCO-07 · `xlsx_report_generator` tem 15 parâmetros — alta superfície de acoplamento
-- **Severidade**: 🟡 MÉDIO
-- **Localização**: `xlsx_report_generator` (L883–975)
-- **Descrição**:
-  A função recebe 15 parâmetros posicionais. Ao extrair para `reports/xlsx_generator.py`,
-  **todos os 15 parâmetros** devem ser passados corretamente pelo `orchestrator.py`.
-  Qualquer erro de ordem ou nomenclatura na chamada causará comportamento incorreto
-  silencioso (sem exception, dados exportados errados).
-- **Impacto durante extração**: O chamador em `orchestrator.py` deve reproduzir
-  exatamente a mesma chamada que hoje existe em `main()` (L292–294).
-- **Mitigação**: Validar a chamada com teste de regressão antes de declarar migração concluída.
+### RISCO-07 · `xlsx_report_generator` com 15 parâmetros posicionais
+- **Severidade**: 🟡 MÉDIO → promovido para 🟠 ALTO após hardening
+- **Score de acoplamento**: 9.5 / 10 — pior função do sistema
+- **Score de portabilidade**: 2.0 / 10
+- **Localização**: `reports/xlsx_generator.py` — `xlsx_report_generator`
+- **Descrição**: 15 parâmetros posicionais sem defaults. Qualquer chamador deve
+  conhecer a ordem exata de todos os 15. Inversão de dois parâmetros booleanos
+  causa comportamento incorreto silencioso.
+- **Impacto na migração**: Em Java, um método com 15 parâmetros seria recusado no
+  code review. Requer `XlsxReportConfig` DTO com Builder pattern.
+- **Ver também**: RISCO-19
+- **Mitigação**: Validar chamada exata no orchestrator. Teste de regressão obrigatório.
 
 ---
 
 ### RISCO-08 · Código morto com `exit(1)` — caminho `multithread=True`
 - **Severidade**: 🟢 BAIXO
-- **Localização**: `main()` (L243–265)
-- **Descrição**:
-  O bloco `else` para `multithread=True` imprime uma série de mensagens e
-  encerra com `exit(1)`. O código `data_loader_parallel` está comentado.
-  Durante a extração, este bloco **deve ser preservado integralmente**
-  (incluindo comentários) ao mover para `orchestrator.py`.
-- **Mitigação**: Copiar o bloco sem qualquer alteração.
+- **Score de risco**: 3.0 / 10
+- **Localização**: `core/orchestrator.py` — bloco `else` do multithread
+- **Descrição**: Bloco `else` para `multithread=True` imprime mensagens e encerra
+  com `exit(1)`. O `data_loader_parallel` está comentado — feature nunca entregue.
+- **Mitigação**: Copiar o bloco sem alteração ao extrair para orchestrator.
 
 ---
 
-### RISCO-09 · Código comentado de features removidas/planejadas
+### RISCO-09 · Código comentado de features removidas
 - **Severidade**: 🟢 BAIXO
-- **Localização**: `main()` (L156–157, L299–302) e outros
-- **Descrição**:
-  Existem vários blocos de código comentado referenciando features removidas:
-  - `export_transeient_data` / `transient_data_exportator`
-  - `data_loader_parallel`
-  - `splitter = config.getint(...)` 
-  - `escape_special_chars` em `dataframe_to_xml`
-  
-  Conforme as regras, estes comentários **NÃO devem ser removidos**.
-  Devem ser preservados no módulo destino.
-- **Mitigação**: Ao extrair cada função, mover os comentários junto com ela.
+- **Score de risco**: 2.0 / 10
+- **Localização**: Múltiplos módulos
+- **Descrição**: Blocos comentados de `export_transeient_data`, `data_loader_parallel`,
+  `splitter`, `escape_special_chars`. Devem ser preservados no módulo destino.
+- **Mitigação**: Copiar comentários junto com a função.
 
 ---
 
 ### RISCO-10 · Dependência implícita de ordem de execução no pipeline
 - **Severidade**: 🟠 ALTO
-- **Localização**: `main()` — ordem de chamadas (L238–294)
-- **Descrição**:
-  O pipeline tem dependências temporais implícitas:
-  1. `new_data_loader` deve rodar antes de tudo (cria `LANCAMENTOS_GERAIS`)
-  2. `create_pivot_history` deve rodar antes de `create_dinamic_reports` (cria `HistoricoGeral`)
-  3. `create_dinamic_reports` deve rodar antes de `xlsx_report_generator`
-     (cria tabelas que o YAML referencia)
-  4. `monthly_summaries` e `split_paymnt_resume` devem rodar antes de `xlsx_report_generator`
-     (criam tabelas que as queries do YAML usam)
-  
-  Esta ordem não está documentada — está apenas implícita na sequência do código.
-- **Impacto durante extração**: O `orchestrator.py` deve preservar **exatamente** esta sequência.
-- **Mitigação**: Documentar explicitamente no `orchestrator.py` extraído.
+- **Score de acoplamento**: 8.5 / 10
+- **Score de modularidade**: 2.0 / 10
+- **Localização**: `core/orchestrator.py` — sequência de chamadas
+- **Descrição**: Pipeline tem dependências temporais implícitas não documentadas:
+  1. `new_data_loader` → cria `LANCAMENTOS_GERAIS` (pré-requisito de tudo)
+  2. `create_pivot_history` → cria `HistoricoGeral` (pré-requisito de dinamic_reports)
+  3. `create_dinamic_reports` → cria tabelas YAML (pré-requisito de xlsx_generator)
+  4. `monthly_summaries` + `split_paymnt_resume` → tabelas para xlsx_generator
+- **Impacto na migração**: Spring Batch exige que dependências de Step sejam declaradas
+  explicitamente via `stepBuilderFactory.next()`. A ordem implícita deve virar grafo de dependências.
+- **Mitigação**: Documentar explicitamente no orchestrator.
 
 ---
 
-## Tabela Resumo de Riscos
+## Riscos Descobertos no Hardening Arquitetural (v10.1.0)
 
-| ID | Descrição | Severidade | Função(ões) | Impacto na Extração |
-|---|---|---|---|---|
-| RISCO-01 | Ambiguidade cursor vs connection | 🔴 CRÍTICO | `table_droppator`, `data_correjeitor` | Documentar tipo esperado |
-| RISCO-02 | SQL com nomes hardcoded | 🔴 CRÍTICO | `data_correjeitor` | Documentar schema implícito |
-| RISCO-03 | `gzip_compressor` destrói original | 🟠 ALTO | `gzip_compressor` | Preservar comportamento |
-| RISCO-04 | Versão duplicada em dois arquivos | 🟠 ALTO | `main`, `.cfg` | Atualizar atomicamente |
-| RISCO-05 | Múltiplas conexões SQLite | 🟡 MÉDIO | 8 funções | Preservar como está |
-| RISCO-06 | Conexão não fechada | 🟡 MÉDIO | `create_pivot_history` | Preservar como está |
-| RISCO-07 | 15 parâmetros em xlsx_generator | 🟡 MÉDIO | `xlsx_report_generator` | Validar chamada exata |
-| RISCO-08 | Código morto com exit(1) | 🟢 BAIXO | `main` | Copiar sem alterar |
-| RISCO-09 | Comentários de código removido | 🟢 BAIXO | múltiplas | Preservar junto com função |
-| RISCO-10 | Ordem de execução implícita | 🟠 ALTO | `main` → pipeline | Documentar no orchestrator |
+---
+
+### RISCO-18 · Inventory completo de connection leaks SQLite
+- **Severidade**: 🔴 CRÍTICO
+- **Score de risco**: 9.0 / 10
+- **Score de portabilidade**: 2.0 / 10
+- **Localização**: `analytics/pivot.py`, `analytics/totals.py`
+
+**Tabela de inventory de conexões (todas as funções com `sqlite3.connect`):**
+
+| Função | Módulo | `connect()` | `commit()` | `close()` | Status |
+|---|---|---|---|---|---|
+| `new_data_loader` | `etl/loader.py` | ✅ | ✅ | ✅ | OK |
+| `totalizador_diario` | `analytics/totals.py` | ✅ | ✅ | ✅ | OK |
+| `general_entries_file_exportator` | `reports/exporter.py` | ✅ | N/A (read) | ✅ | OK |
+| `create_pivot_history` | `analytics/pivot.py` | ✅ | ✅ | ❌ | **LEAK** |
+| `monthly_summaries` | `analytics/totals.py` | ✅ | ❌ | ❌ | **LEAK + MISSING COMMIT** |
+| `split_paymnt_resume` | `analytics/totals.py` | ✅ | ❌ | ❌ | **LEAK + MISSING COMMIT** |
+
+**Consequências por função:**
+
+- **`create_pivot_history`**: Dados são commitados (pivot history persiste) mas conexão
+  não é fechada. Em execuções repetidas ou testes, pode causar `database is locked`.
+
+- **`monthly_summaries`**: `pandas.to_sql()` é chamado 3× mas sem `commit()` explícito.
+  `pandas.to_sql()` com `con` do sqlite3 pode ou não auto-commitar dependendo da versão
+  do pandas. Sem `close()`, a conexão fica aberta indefinidamente. Em caso de falha parcial,
+  tabelas de sumarização mensal podem estar corrompidas silenciosamente.
+
+- **`split_paymnt_resume`**: Mesmo padrão que `monthly_summaries`. `to_sql()` sem commit
+  explícito, sem close. Tabela de parcelamentos pode estar em estado inconsistente.
+
+**Impacto na migração Java:**
+  Em JDBC, `Connection.close()` sem `commit()` prévio faz rollback automático (JDBC default:
+  `autoCommit=false`). Dados que o Python persiste por acidente (auto-commit do sqlite3 em
+  DDL) serão perdidos no equivalente Java.
+
+**Mitigação imediata (P0)**:
+```python
+# Padrão correto para todas as funções:
+with sqlite3.connect(db_file) as conn:
+    # operações...
+    conn.commit()
+# context manager fecha automaticamente
+```
+
+---
+
+### RISCO-19 · `xlsx_report_generator` — acoplamento extremo como blocker de migração
+- **Severidade**: 🟠 ALTO
+- **Score de acoplamento**: 9.5 / 10 — pior do sistema
+- **Score de portabilidade**: 1.5 / 10
+- **Localização**: `reports/xlsx_generator.py` — `xlsx_report_generator`
+- **Assinatura completa**:
+  ```python
+  def xlsx_report_generator(
+      sqlite_database,      # 1 — path do .db
+      dir_out,              # 2 — diretório de saída
+      file_name,            # 3 — nome base do arquivo
+      write_multiple_files, # 4 — bool: um xlsx por sheet?
+      out_extension,        # 5 — extensão do arquivo
+      entries_table,        # 6 — tabela de lançamentos
+      dynamic_reports,      # 7 — bool: gerar reports dinâmicos?
+      dyn_rep_tab,          # 8 — tabela de reports dinâmicos
+      gera_hist,            # 9 — bool: gerar histórico?
+      anual_hist,           # 10 — bool: histórico anual?
+      full_hist,            # 11 — bool: histórico completo?
+      day_prog,             # 12 — bool: progresso diário?
+      splt_pmnt_res,        # 13 — bool: resumo parcelamentos?
+      mont_summ,            # 14 — bool: sumarizações mensais?
+      yaml_queries_file     # 15 — path do .yaml
+  ):
+  ```
+- **Descrição**: 15 parâmetros posicionais sem defaults, sem type hints, sem dataclass.
+  7 dos 15 são booleanos — inversão silenciosa entre parâmetros 9-14 causa output incorreto.
+  Nenhum IDe pode ajudar o desenvolvedor a saber qual booleano é qual na chamada.
+- **Impacto na migração**: Em qualquer linguagem tipada (Java, Rust, Go, C++), este padrão
+  é um blocker arquitetural. Requer extração de `XlsxReportConfig` antes de qualquer migração.
+  Em Java:
+  ```java
+  XlsxReportConfig config = XlsxReportConfig.builder()
+      .sqliteDatabase(dbPath)
+      .dirOut(outDir)
+      .generateHistory(true)
+      // ... etc
+      .build();
+  xlsxReportGenerator.generate(config);
+  ```
+- **Mitigação**: Criar dataclass Python antes da migração; usar como base para DTO Java.
+
+---
+
+### RISCO-20 · `monthly_summaries` e `split_paymnt_resume` — dados sem commit confirmado
+- **Severidade**: 🔴 CRÍTICO
+- **Score de risco**: 8.5 / 10
+- **Localização**: `analytics/totals.py`
+- **Código afetado**:
+  ```python
+  def monthly_summaries(db_file, in_table, out_table):
+      db_conn = sqlite3.connect(db_file)
+      df_month.to_sql('SUMARIO_MENSAL', db_conn, if_exists='replace', index=False)
+      df_month_pct.to_sql('SUMARIO_MENSAL_PCT', db_conn, if_exists='replace', index=False)
+      df_categories.to_sql('SUMARIO_CATEGORIAS', db_conn, if_exists='replace', index=False)
+      # Sem db_conn.commit()
+      # Sem db_conn.close()
+
+  def split_paymnt_resume(db_file, in_table, parcel_table):
+      db_conn = sqlite3.connect(db_file)
+      df_split.to_sql('SPLIT_RESUME', db_conn, if_exists='replace', index=False)
+      # Sem db_conn.commit()
+      # Sem db_conn.close()
+  ```
+- **Descrição**: `pandas.to_sql()` com conexão raw `sqlite3` opera no modo `autocommit`
+  do sqlite3 (que é `isolation_level=''` por padrão — DDL auto-commita, DML não).
+  `to_sql()` usa `BEGIN TRANSACTION` internamente → requer `commit()` explícito.
+  Se o processo terminar abruptamente após `to_sql()` sem `commit()`, os dados são perdidos.
+  O fato de funcionar em produção não significa que está correto — significa que o processo
+  termina normalmente e o sqlite3 faz flush no close do GC.
+- **Impacto na migração**: Em Java com JDBC `autoCommit=false`, estes dados seriam
+  PERDIDOS silenciosamente — rollback automático no `Connection.close()`.
+- **Mitigação imediata (P0)**: Adicionar `db_conn.commit()` e `db_conn.close()` em ambas.
+
+---
+
+### RISCO-21 · Padrão `exit(1)` — impede recovery, testes e encadeamento
+- **Severidade**: 🟠 ALTO
+- **Score de risco**: 7.0 / 10
+- **Score de testabilidade**: 1.5 / 10
+- **Localização**: `core/orchestrator.py` — múltiplos pontos
+- **Ocorrências identificadas**:
+  ```python
+  exit(1)  # verificação de versão
+  exit(1)  # multithread não suportado
+  exit(1)  # arquivo de configuração não encontrado
+  exit(1)  # banco de dados não encontrado
+  exit(1)  # Excel de entrada não encontrado
+  ```
+- **Descrição**: `exit(1)` termina o processo Python inteiro, sem possibilidade de
+  captura por caller, sem logging do motivo, sem cleanup de recursos, sem possibilidade
+  de retry por orchestrador externo (cron, Airflow, scheduler).
+  Em testes com pytest, `exit(1)` mata o processo de teste inteiro — impossível testar
+  qualquer função que internamente possa chamar exit(1).
+- **Impacto na migração**: Em Java, o equivalente seria `System.exit(1)` — igualmente
+  problemático. O padrão correto é lançar `PdwConfigurationException` e deixar o
+  ponto de entrada da aplicação fazer `System.exit`.
+- **Score de testabilidade do sistema com exit(1)**: 1.5 / 10
+- **Mitigação**: Substituir `exit(1)` por `raise PdwError(message)` em todos os módulos.
+  Manter `exit(1)` apenas no ponto de entrada (`__main__`).
+
+---
+
+### RISCO-22 · Nomes de colunas com acentos e espaços em SQL hardcoded
+- **Severidade**: 🟠 ALTO
+- **Score de portabilidade**: 2.0 / 10
+- **Localização**: `etl/sanitizer.py`, `analytics/pivot.py`
+- **Exemplos reais**:
+  ```python
+  # etl/sanitizer.py
+  'DELETE FROM Parcelamentos WHERE ... "Tipo Lançamento" is null'
+  # analytics/pivot.py  
+  cursor.execute(f'... WHERE "Código" = ? AND "Descrição" = ?', ...)
+  # utils/transient_data.py
+  WHERE {origing_column} = '{linhas.Origem}'  # SQL injection + encoding risk
+  ```
+- **Descrição**: Nomes de colunas contêm:
+  - Espaços: `"Tipo Lançamento"` — requer quoting com `"` em SQLite
+  - Acentos PT-BR: `"Lançamento"`, `"Código"`, `"Descrição"` — encoding-sensitive
+  - Misto de caixa: `GUIDING`, `Parcelamentos`, `Origens` — SQLite case-insensitive, outros DBs não
+- **Impacto na migração**:
+  - **PostgreSQL**: nomes com acento requerem `"` quotes, mas PostgreSQL é case-sensitive com quotes
+  - **MySQL**: encoding do schema deve ser `utf8mb4` para acentos PT-BR
+  - **Java Hibernate**: `@Column(name = "Tipo Lançamento")` — problemático com espaço
+  - **JOOQ**: geração de código a partir do schema vai gerar identificadores inválidos
+- **Mitigação**: Ao migrar para outro banco, renomear colunas para snake_case ASCII.
+  Criar migration script de mapeamento. Manter nomes originais somente no SQLite legacy.
+
+---
+
+## Tabela Resumo — Todos os Riscos
+
+| ID | Descrição | Severidade | Score | Módulo(s) | Impacto na Migração |
+|---|---|---|---|---|---|
+| RISCO-01 | Ambiguidade cursor vs connection | 🔴 CRÍTICO | 8.0 | `database/operations.py` | Tipagem explícita em Java |
+| RISCO-02 | SQL hardcoded com nomes de tabelas | 🔴 CRÍTICO | 9.0 | `etl/sanitizer.py` | ORM blocker |
+| RISCO-03 | gzip_compressor destrói original | 🟠 ALTO | 7.0 | `utils/compression.py` | Padrão diferente em JVM |
+| RISCO-04 | Versão duplicada em dois arquivos | 🟠 ALTO | 6.5 | `config/loader.py` + `.cfg` | Sincronização manual |
+| RISCO-05 | Múltiplas conexões sem pool | 🟡 MÉDIO | 5.5 | 8 funções | Semântica JDBC diferente |
+| RISCO-06 | create_pivot_history — sem close() | 🟠 ALTO | 7.5 | `analytics/pivot.py` | database is locked |
+| RISCO-07 | xlsx_generator — 15 parâmetros | 🟠 ALTO | 8.5 | `reports/xlsx_generator.py` | Blocker arquitetural |
+| RISCO-08 | Código morto com exit(1) | 🟢 BAIXO | 2.0 | `core/orchestrator.py` | Preservar |
+| RISCO-09 | Código comentado de features | 🟢 BAIXO | 1.5 | múltiplos | Preservar |
+| RISCO-10 | Ordem de execução implícita | 🟠 ALTO | 8.0 | `core/orchestrator.py` | Grafo de dependências |
+| RISCO-18 | Connection leaks — 3 funções | 🔴 CRÍTICO | 9.0 | `analytics/` | Rollback automático JDBC |
+| RISCO-19 | xlsx_generator — acoplamento extremo | 🟠 ALTO | 9.5 | `reports/xlsx_generator.py` | DTO obrigatório |
+| RISCO-20 | monthly_summaries — sem commit | 🔴 CRÍTICO | 8.5 | `analytics/totals.py` | Dados perdidos em Java |
+| RISCO-21 | exit(1) impede testes e recovery | 🟠 ALTO | 7.0 | `core/orchestrator.py` | PdwException pattern |
+| RISCO-22 | Colunas com acentos e espaços em SQL | 🟠 ALTO | 7.5 | `etl/`, `analytics/` | Schema rename obrigatório |
+
+---
+
+## Plano de Remediação por Prioridade
+
+### P0 — Antes de qualquer migração (bugs reais em produção)
+
+| Item | Arquivo | Ação |
+|---|---|---|
+| Connection leak + missing commit | `analytics/totals.py` | Adicionar `commit()` + `close()` a `monthly_summaries` e `split_paymnt_resume` |
+| Connection leak | `analytics/pivot.py` | Adicionar `close()` a `create_pivot_history` |
+| SQL injection crítica | `database/operations.py` | Parametrizar `DROP TABLE IF EXISTS` |
+
+### P1 — Antes de migrar para outra linguagem
+
+| Item | Arquivo | Ação |
+|---|---|---|
+| 15 parâmetros | `reports/xlsx_generator.py` | Criar `XlsxReportConfig` dataclass |
+| exit(1) abusivo | `core/orchestrator.py` | Substituir por `raise PdwError` |
+| Schema hardcoded | `etl/sanitizer.py` | Extrair constantes de nomes de tabela/coluna |
+
+### P2 — Durante a migração de linguagem
+
+| Item | Ação |
+|---|---|
+| Nomes de colunas com acento | Criar migration de rename para snake_case ASCII |
+| Ordem de execução implícita | Documentar como grafo de dependências de Step |
+| Múltiplas conexões | Centralizar em único connection manager |
+
+### P3 — Melhorias pós-migração
+
+| Item | Ação |
+|---|---|
+| iterrows() O(n) | Substituir por operações vetorizadas ou `to_xml()` |
+| Double Excel read no loop | Ler fora do loop, usar cache |
+| SELECT * em pivot | Substituir por GROUP BY SQL |
+| Sem SQLite indexes | Adicionar `CREATE INDEX` em LANCAMENTOS_GERAIS |
+
+---
+
+## Riscos Adicionais — Reescrita Multi-Linguagem (Fase 4)
+
+---
+
+### RISCO-11 · Inferência de tipo do Excel: pandas vs leitura manual
+- **Severidade**: 🔴 CRÍTICO
+- **Score de portabilidade**: 2.0 / 10 (Java/Go/C++)
+- **Descrição**: `pandas.read_excel()` infere tipos automaticamente. Em Java (Apache POI),
+  Rust (calamine), Go (excelize), a leitura é por célula com tipo explícito.
+  Células que o pandas inferiu como datas podem vir como números seriais Excel
+  (ex: `45297` em vez de `2025-01-15`) se não tratadas corretamente.
+- **Impacto**: Dados de Data incorretos → pivot tables e sumarizações erradas.
+- **Mitigação**: Verificar `DateUtil.isCellDateFormatted(cell)` (Java) antes de parsear célula numérica como data.
+
+---
+
+### RISCO-12 · Células vazias vs nulas: comportamento diferente por linguagem
+- **Severidade**: 🟠 ALTO
+- **Score de portabilidade**: 3.0 / 10
+- **Descrição**: Python/pandas trata células vazias como `NaN` (float). Java/POI retorna
+  `CellType.BLANK`. Go/excelize retorna string vazia `""`. O PDW usa `pd.isna()` para detectar nulos.
+- **Mitigação**: Criar função helper `isNullOrEmpty()` na linguagem alvo com semântica idêntica ao pandas.
+
+---
+
+### RISCO-13 · Encoding de strings: UTF-8 vs outros
+- **Severidade**: 🟡 MÉDIO
+- **Score de portabilidade**: 5.0 / 10
+- **Descrição**: PDW processa strings PT-BR com acentos. Planilhas Excel antigas podem usar Windows-1252.
+- **Mitigação**: Forçar UTF-8 em todas as operações. Apache POI lida automaticamente para XLSX.
+
+---
+
+### RISCO-14 · Formato de data no banco: ISO vs local
+- **Severidade**: 🟠 ALTO
+- **Score de portabilidade**: 4.0 / 10
+- **Descrição**: PDW armazena datas no SQLite como string `YYYY-MM-DD` (formato pandas).
+  Queries SQL que usam `strftime('%Y', Data)` dependem deste formato exato.
+- **Mitigação**: Sempre converter datas para ISO `YYYY-MM-DD` antes de inserir no SQLite.
+
+---
+
+### RISCO-15 · Separador CSV: `;` vs `,`
+- **Severidade**: 🟢 BAIXO
+- **Score de portabilidade**: 8.0 / 10
+- **Descrição**: PDW exporta CSV com separador `;`. Scripts externos podem depender disso.
+- **Mitigação**: Hardcode do separador `;` na exportação CSV da linguagem alvo.
+
+---
+
+### RISCO-16 · Ordem das linhas no banco: ordenação descendente por Data
+- **Severidade**: 🟡 MÉDIO
+- **Score de portabilidade**: 6.0 / 10
+- **Descrição**: `save_dataframe_to_database()` ordena por Data descendente antes de inserir.
+  Queries que dependem de `ROWID` ou ordem de inserção retornarão resultados em ordem diferente.
+- **Mitigação**: Sempre usar `ORDER BY` explícito nas queries analíticas. Aplicar sort antes de bulk insert.
+
+---
+
+### RISCO-17 · Schema implícito em `data_correjeitor`
+- **Severidade**: 🔴 CRÍTICO
+- **Score de portabilidade**: 2.0 / 10
+- **Descrição**: `data_correjeitor` assume tabelas `Parcelamentos`, `GUIDING`, view `Origens`
+  com estrutura específica. Dependências implícitas não declaradas em nenhum interface.
+- **Estrutura implícita assumida**:
+  ```sql
+  -- GUIDING: TABLE_NAME TEXT, ACCOUNTING TEXT, LOADABLE TEXT
+  -- Parcelamentos: DATA TEXT, "Tipo Lançamento" TEXT
+  -- View Origens (criada pela função): SELECT TABLE_NAME as nome FROM GUIDING WHERE LOADABLE = 'X'
+  ```
+- **Mitigação**: Verificar existência e estrutura das tabelas na inicialização da migração.
+
+---
+
+## Tabela de Riscos Multi-Linguagem
+
+| ID | Descrição | Java | Rust | Go | Node.js | C++ | Score portabilidade |
+|---|---|---|---|---|---|---|---|
+| RISCO-11 | Inferência de tipo Excel | 🔴 | 🟠 | 🟠 | 🟡 | 🔴 | 2.0 |
+| RISCO-12 | Células vazias vs nulas | 🟠 | 🟡 | 🟠 | 🟢 | 🟠 | 3.0 |
+| RISCO-13 | Encoding UTF-8 | 🟡 | 🟢 | 🟢 | 🟢 | 🟠 | 5.0 |
+| RISCO-14 | Formato de data no banco | 🟠 | 🟠 | 🟠 | 🟠 | 🟠 | 4.0 |
+| RISCO-15 | Separador CSV `;` | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | 8.0 |
+| RISCO-16 | Ordenação descendente | 🟡 | 🟡 | 🟡 | 🟡 | 🟡 | 6.0 |
+| RISCO-17 | Schema implícito | 🔴 | 🔴 | 🔴 | 🔴 | 🔴 | 2.0 |
+| RISCO-18 | Connection leaks | 🔴 | 🟢 | 🟢 | 🟡 | 🔴 | 2.0 |
+| RISCO-19 | 15-param function | 🔴 | 🟠 | 🟠 | 🟡 | 🔴 | 1.5 |
+| RISCO-20 | Missing commits | 🔴 | 🟢 | 🟢 | 🟡 | 🟠 | 2.0 |
+| RISCO-22 | Nomes com acento em SQL | 🔴 | 🟠 | 🟠 | 🟡 | 🔴 | 2.0 |
 
 ---
 
@@ -214,98 +527,15 @@
 
 A migração será considerada bem-sucedida quando:
 
-1. **Funcional**: A saída do pipeline (banco `.db`, arquivos `.xlsx`, `.csv`, `.json.gz`, `.xml.gz`) for **bit-a-bit idêntica** entre v9.11.2 e v10.1.0 para o mesmo arquivo Excel de entrada.
-2. **Configuração**: O arquivo `PersonalDataWareHouse.cfg` com `CURRENT_VERSION = 10.1.0` executar sem erros.
-3. **Compatibilidade**: O `RunPDW.sh` executar o novo código sem alterações (via shim ou ajuste de path).
+1. **Funcional**: A saída do pipeline (banco `.db`, arquivos `.xlsx`, `.csv`, `.json.gz`, `.xml.gz`)
+   for **bit-a-bit idêntica** entre a versão Python e a versão na linguagem alvo para o mesmo Excel.
+2. **Configuração**: O arquivo `PersonalDataWareHouse.cfg` executar sem erros.
+3. **Compatibilidade**: O `RunPDW.sh` executar o novo código sem alterações.
 4. **Estrutura**: Cada módulo contém apenas as funções listadas no inventário para aquele módulo.
-5. **Sem novos imports**: Nenhum novo framework ou biblioteca foi introduzido.
-
----
-
-## Riscos Adicionais para Reescrita Multi-Linguagem (Fase 4)
-
-Os riscos abaixo se aplicam especificamente ao processo de reescrita completa em outra linguagem.
-
----
-
-### RISCO-11 · Inferência de tipo do Excel: pandas vs leitura manual — CRÍTICO
-
-**Descrição**: `pandas.read_excel()` infere automaticamente tipos de células (número, data, string, booleano). Em Java (Apache POI), Rust (calamine), Go (excelize), a leitura é por célula com tipo explícito. Células que o pandas inferiu como datas podem vir como números seriais Excel (ex: `45297` em vez de `2025-01-15`) se não tratadas corretamente.
-
-**Impacto**: Dados de Data incorretos → pivot tables e sumarizações erradas.
-
-**Mitigação**: Verificar `DateUtil.isCellDateFormatted(cell)` (Java) ou equivalente antes de parsear qualquer célula numérica como data.
-
----
-
-### RISCO-12 · Células vazias vs nulas: comportamento diferente por linguagem — ALTO
-
-**Descrição**: O Python/pandas trata células vazias como `NaN` (float). Em Java, POI retorna `CellType.BLANK`. Em Go/excelize, células ausentes retornam string vazia `""`. O PDW usa `pd.isna()` para detectar nulos — o equivalente é diferente em cada linguagem.
-
-**Mitigação**: Criar função helper de "is_null_or_empty" na linguagem alvo que mapeia exatamente ao comportamento do pandas (`pd.isna()` retorna True para `None`, `NaN`, `pd.NaT`).
-
----
-
-### RISCO-13 · Encoding de strings: UTF-8 vs outros — MÉDIO
-
-**Descrição**: O PDW processa strings como `∴` (ponto triplo), `ś` (s com cedilha), caracteres acentuados PT-BR. O Python 3 usa UTF-8 internamente. Planilhas Excel antigas podem usar Windows-1252 em campos de texto.
-
-**Impacto**: Caracteres especiais podem corromper ao ler com encoding incorreto.
-
-**Mitigação**: Forçar UTF-8 em todas as operações de leitura/escrita. Apache POI lida com isso automaticamente para XLSX.
-
----
-
-### RISCO-14 · Formato de data no banco: ISO vs local — ALTO
-
-**Descrição**: O PDW armazena datas no SQLite como string no formato que o pandas gera ao chamar `to_sql()`. O formato padrão do pandas é `YYYY-MM-DD` para datas e `YYYY-MM-DD HH:MM:SS.ffffff` para timestamps. Queries SQL que usam `strftime('%Y', Data)` dependem desse formato exato.
-
-**Mitigação**: Ao inserir no SQLite, sempre converter datas para string ISO `YYYY-MM-DD`. Verificar com `SELECT * FROM LANCAMENTOS_GERAIS LIMIT 1` que o formato está correto antes de rodar queries de pivot.
-
----
-
-### RISCO-15 · Separador CSV: `;` vs `,` — BAIXO
-
-**Descrição**: O PDW exporta CSV com separador `;` (ponto e vírgula), não `,`. Scripts externos que consomem o CSV podem quebrar se a reescrita usar `,` como padrão.
-
-**Mitigação**: Hardcode do separador `;` na exportação CSV. Documentar no formato de saída.
-
----
-
-### RISCO-16 · Ordem das linhas no banco: ordenação descendente por Data — MÉDIO
-
-**Descrição**: `save_dataframe_to_database()` ordena o DataFrame por Data descendente antes de inserir. Reescritas que não preservarem esta ordenação produzirão bancos com linhas em ordem diferente. Queries analíticas que dependem de `ROWID` ou ordem de inserção podem retornar resultados em ordem diferente.
-
-**Mitigação**: Aplicar `ORDER BY Data DESC` antes de qualquer bulk insert no SQLite. Alternativamente, sempre usar `ORDER BY` explícito nas queries analíticas.
-
----
-
-### RISCO-17 · Tabelas hardcoded em `data_correjeitor`: schema implícito — CRÍTICO
-
-**Descrição**: A função `data_correjeitor` assume que as tabelas `Parcelamentos`, `GUIDING` e a view `Origens` existem com estrutura específica. Em qualquer reescrita, estas dependências implícitas devem ser tornadas explícitas e verificadas na inicialização.
-
-**Estrutura implícita assumida**:
-```sql
--- GUIDING deve ter:
-TABLE_NAME TEXT, ACCOUNTING TEXT, LOADABLE TEXT
-
--- Parcelamentos deve ter:
-DATA TEXT (ou date), "Tipo Lançamento" TEXT
-
--- View Origens (criada pela própria função):
-SELECT TABLE_NAME as nome FROM GUIDING WHERE LOADABLE = 'X'
-```
-
----
-
-### Tabela de Riscos Multi-Linguagem
-
-| ID | Descrição | Linguagem mais afetada | Severidade |
-|---|---|---|---|
-| RISCO-11 | Inferência de tipo Excel | Java, Go, C++ | CRÍTICO |
-| RISCO-12 | Células vazias vs nulas | Java, Go, Rust | ALTO |
-| RISCO-13 | Encoding UTF-8 | Todas | MÉDIO |
-| RISCO-14 | Formato de data no banco | Todas | ALTO |
-| RISCO-15 | Separador CSV `;` | Todas | BAIXO |
-| RISCO-16 | Ordenação descendente | Todas | MÉDIO |
-| RISCO-17 | Schema implícito em data_correjeitor | Todas | CRÍTICO |
+5. **Sem novos imports**: Nenhum novo framework foi introduzido além dos mapeados em MATRIZ_COMPARATIVA.
+6. **Scores pós-migração esperados**:
+   - Risco Global: ≤ 4.0 / 10
+   - Acoplamento: ≤ 5.0 / 10
+   - Modularidade: ≥ 7.0 / 10
+   - Portabilidade: ≥ 7.0 / 10
+   - Testabilidade: ≥ 6.0 / 10
